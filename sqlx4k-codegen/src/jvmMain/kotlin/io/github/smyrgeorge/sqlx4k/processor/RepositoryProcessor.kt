@@ -1,20 +1,7 @@
 package io.github.smyrgeorge.sqlx4k.processor
 
-import com.google.devtools.ksp.processing.CodeGenerator
-import com.google.devtools.ksp.processing.Dependencies
-import com.google.devtools.ksp.processing.KSPLogger
-import com.google.devtools.ksp.processing.Resolver
-import com.google.devtools.ksp.processing.SymbolProcessor
-import com.google.devtools.ksp.symbol.ClassKind
-import com.google.devtools.ksp.symbol.KSAnnotated
-import com.google.devtools.ksp.symbol.KSAnnotation
-import com.google.devtools.ksp.symbol.KSClassDeclaration
-import com.google.devtools.ksp.symbol.KSDeclaration
-import com.google.devtools.ksp.symbol.KSFunctionDeclaration
-import com.google.devtools.ksp.symbol.KSPropertyDeclaration
-import com.google.devtools.ksp.symbol.KSType
-import com.google.devtools.ksp.symbol.KSValueArgument
-import com.google.devtools.ksp.symbol.KSValueParameter
+import com.google.devtools.ksp.processing.*
+import com.google.devtools.ksp.symbol.*
 import com.google.devtools.ksp.validate
 import io.github.smyrgeorge.sqlx4k.Statement
 import java.io.OutputStream
@@ -39,6 +26,8 @@ class RepositoryProcessor(
             .getSymbolsWithAnnotation(TypeNames.REPOSITORY_ANNOTATION)
             .filterIsInstance<KSClassDeclaration>()
         if (!repoSymbols.iterator().hasNext()) return emptyList()
+
+        val tableLookup = TableLookup(resolver)
 
         val outputPackage = options[TableProcessor.PACKAGE_OPTION]
             ?: error("Missing ${TableProcessor.PACKAGE_OPTION} option")
@@ -474,6 +463,9 @@ class RepositoryProcessor(
         validateReturnType(prefix, fn, domainDecl)
         if (validateSyntax) SqlValidator.validateQuerySyntax(fn.simpleName(), sql)
         if (validateSchema) SqlValidator.validateQuerySchema(fn.simpleName(), sql)
+        val analysis = SqlValidator.analyseQuery(sql)
+        if (analysis == null)
+            logger.warn("Unable to analyze SQL query (${fn.simpleName()}): $sql")
 
         logger.info("[RepositoryProcessor] Emitting method '$name' with prefix ${prefix.name} in ${domainDecl.qualifiedName()} using mapper $mapperTypeName")
 
@@ -517,13 +509,14 @@ class RepositoryProcessor(
             }
 
             Prefix.FIND_ONE_BY -> {
-                file += "        $contextParamName.fetchAll(statement, $mapperTypeName).map { list ->\n"
-                file += "            when (list.size) {\n"
-                file += "                0 -> null\n"
-                file += "                1 -> list.first()\n"
-                file += "                else -> return@run Result.failure(IllegalStateException(\"findOneBy query returned more than one row\"))\n"
-                file += "            }\n"
-                file += "        }\n"
+                file += """        $contextParamName.fetchAll(statement, $mapperTypeName).map { list ->
+                                    when (list.size) {
+                                        0 -> null
+                                        1 -> list.first()
+                                        else -> return@run Result.failure(IllegalStateException("findOneBy query returned more than one row"))
+                                    }
+                                }
+                        """.trimIndent()
             }
 
             Prefix.DELETE_ALL, Prefix.DELETE_BY, Prefix.EXECUTE -> {

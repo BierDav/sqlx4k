@@ -33,7 +33,7 @@ class MySQL(
     username: String,
     password: String,
     options: ConnectionPool.Options = ConnectionPool.Options(),
-) : IMySQL {
+) : IMySQL, DriverBase() {
     private val rt: CPointer<out CPointed> = sqlx4k_of(
         url = url,
         username = username,
@@ -114,10 +114,10 @@ class MySQL(
      *              This pointer is required for any database operations performed through this connection.
      * @property cn A `CPointer` representing the native connection object.
      */
-    class Cn(
+    private inner class Cn(
         private val rt: CPointer<out CPointed>,
         private val cn: CPointer<out CPointed>
-    ) : Connection {
+    ) : CnBase() {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
@@ -167,69 +167,70 @@ class MySQL(
                 }
             }
         }
-    }
 
-    /**
-     * Implementation of the `Transaction` interface that provides methods to manage
-     * and execute transactional operations using SQL commands. Transactions are
-     * synchronized using a `Mutex` to maintain thread safety.
-     *
-     * @constructor Initializes the transaction implementation with the provided transaction pointer.
-     * @property tx The transaction pointer representing the current state and context of the transaction.
-     */
-    class Tx(
-        private val rt: CPointer<out CPointed>,
-        private var tx: CPointer<out CPointed>
-    ) : Transaction {
-        private val mutex = Mutex()
-        private var _status: Transaction.Status = Transaction.Status.Open
-        override val status: Transaction.Status get() = _status
 
-        override suspend fun commit(): Result<Unit> = runCatching {
-            mutex.withLock {
-                assertIsOpen()
-                _status = Transaction.Status.Closed
-                sqlx { c -> sqlx4k_tx_commit(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
-            }
-        }
+        /**
+         * Implementation of the `Transaction` interface that provides methods to manage
+         * and execute transactional operations using SQL commands. Transactions are
+         * synchronized using a `Mutex` to maintain thread safety.
+         *
+         * @constructor Initializes the transaction implementation with the provided transaction pointer.
+         * @property tx The transaction pointer representing the current state and context of the transaction.
+         */
+        inner class Tx(
+            private val rt: CPointer<out CPointed>,
+            private var tx: CPointer<out CPointed>
+        ) : TxBase() {
+            private val mutex = Mutex()
+            private var _status: Transaction.Status = Transaction.Status.Open
+            override val status: Transaction.Status get() = _status
 
-        override suspend fun rollback(): Result<Unit> = runCatching {
-            mutex.withLock {
-                assertIsOpen()
-                _status = Transaction.Status.Closed
-                sqlx { c -> sqlx4k_tx_rollback(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
-            }
-        }
-
-        override suspend fun execute(sql: String): Result<Long> = runCatching {
-            mutex.withLock {
-                assertIsOpen()
-                sqlx { c -> sqlx4k_tx_query(rt, tx, sql, c, DriverNativeUtils.fn) }.use {
-                    tx = it.tx!!
-                    it.throwIfError()
-                    it.rows_affected.toLong()
+            override suspend fun commit(): Result<Unit> = runCatching {
+                mutex.withLock {
+                    assertIsOpen()
+                    _status = Transaction.Status.Closed
+                    sqlx { c -> sqlx4k_tx_commit(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
                 }
             }
-        }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
-
-        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
-            return mutex.withLock {
-                assertIsOpen()
-                sqlx { c -> sqlx4k_tx_fetch_all(rt, tx, sql, c, DriverNativeUtils.fn) }.use {
-                    tx = it.tx!!
-                    it.toResultSet()
-                }.toResult()
+            override suspend fun rollback(): Result<Unit> = runCatching {
+                mutex.withLock {
+                    assertIsOpen()
+                    _status = Transaction.Status.Closed
+                    sqlx { c -> sqlx4k_tx_rollback(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
+                }
             }
+
+            override suspend fun execute(sql: String): Result<Long> = runCatching {
+                mutex.withLock {
+                    assertIsOpen()
+                    sqlx { c -> sqlx4k_tx_query(rt, tx, sql, c, DriverNativeUtils.fn) }.use {
+                        tx = it.tx!!
+                        it.throwIfError()
+                        it.rows_affected.toLong()
+                    }
+                }
+            }
+
+            override suspend fun execute(statement: Statement): Result<Long> =
+                execute(statement.render(encoders))
+
+            override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+                return mutex.withLock {
+                    assertIsOpen()
+                    sqlx { c -> sqlx4k_tx_fetch_all(rt, tx, sql, c, DriverNativeUtils.fn) }.use {
+                        tx = it.tx!!
+                        it.toResultSet()
+                    }.toResult()
+                }
+            }
+
+            override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
+                fetchAll(statement.render(encoders))
+
+            override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
+                fetchAll(statement.render(encoders), rowMapper)
         }
-
-        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-            fetchAll(statement.render(encoders))
-
-        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-            fetchAll(statement.render(encoders), rowMapper)
     }
 
     companion object {

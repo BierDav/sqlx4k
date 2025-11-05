@@ -9,6 +9,8 @@ import io.asyncer.r2dbc.mysql.codec.CodecContext
 import io.asyncer.r2dbc.mysql.codec.CodecRegistry
 import io.asyncer.r2dbc.mysql.extension.CodecRegistrar
 import io.github.smyrgeorge.sqlx4k.*
+import io.github.smyrgeorge.sqlx4k.impl.invalidation.DefaultTableInvalidationScope
+import io.github.smyrgeorge.sqlx4k.impl.invalidation.TransactionTableInvalidationScope
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
 import io.netty.buffer.ByteBuf
@@ -54,7 +56,7 @@ class MySQL(
     password: String,
     options: ConnectionPool.Options = ConnectionPool.Options(),
 ) : IMySQL {
-
+    override val invalidationScope = DefaultTableInvalidationScope()
     private val connectionFactory: MySqlConnectionFactory = connectionFactory(url, username, password)
     private val poolConfiguration: ConnectionPoolConfiguration = connectionOptions(options, connectionFactory)
     private val pool: R2dbcConnectionPool = R2dbcConnectionPool(poolConfiguration).apply {
@@ -131,18 +133,6 @@ class MySQL(
     override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
         fetchAll(statement.render(encoders), rowMapper)
 
-    override suspend fun begin(): Result<Transaction> = runCatching {
-        with(pool.acquire()) {
-            try {
-                beginTransaction().awaitFirstOrNull()
-            } catch (e: Exception) {
-                close().awaitFirstOrNull()
-                SQLError(SQLError.Code.Database, e.message).ex()
-            }
-            Tx(this, true)
-        }
-    }
-
     private suspend fun R2dbcConnectionPool.acquire(): R2dbcConnection {
         return try {
             create().awaitSingle()
@@ -167,12 +157,13 @@ class MySQL(
      * @constructor Creates an instance of `Cn` with the specified `R2dbcConnection`.
      * @property connection The underlying `R2dbcConnection` used for executing database queries and transactions.
      */
-    class Cn(
-        private val connection: R2dbcConnection
-    ) : Connection {
+    inner class Cn(
+        private val connection: R2dbcConnection,
+    ) : Connection, TableInvalidationScopeProvider by this {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
+
 
         override suspend fun close(): Result<Unit> = runCatching {
             mutex.withLock {
@@ -218,79 +209,86 @@ class MySQL(
                 Tx(connection, false)
             }
         }
-    }
 
-    /**
-     * Represents a transaction implementation that provides functionality for managing
-     * and executing operations within a transactional context.
-     *
-     * @property connection The underlying R2DBC connection used to execute the transaction.
-     * @property closeConnectionAfterTx Indicates whether the connection should be closed after the transaction is completed.
-     *
-     * This class uses a [Mutex] to ensure thread-safety for the transaction's operations.
-     * It includes methods for committing, rolling back, and executing queries within
-     * the scope of the transaction.
-     */
-    class Tx(
-        private var connection: R2dbcConnection,
-        private val closeConnectionAfterTx: Boolean
-    ) : Transaction {
-        private val mutex = Mutex()
-        private var _status: Transaction.Status = Transaction.Status.Open
-        override val status: Transaction.Status get() = _status
 
-        override suspend fun commit(): Result<Unit> = runCatching {
-            mutex.withLock {
-                assertIsOpen()
-                _status = Transaction.Status.Closed
-                try {
-                    connection.commitTransaction().awaitFirstOrNull()
-                } catch (e: Exception) {
-                    SQLError(SQLError.Code.Database, e.message).ex()
-                } finally {
-                    if (closeConnectionAfterTx) connection.close().awaitFirstOrNull()
+        /**
+         * Represents a transaction implementation that provides functionality for managing
+         * and executing operations within a transactional context.
+         *
+         * @property connection The underlying R2DBC connection used to execute the transaction.
+         * @property closeConnectionAfterTx Indicates whether the connection should be closed after the transaction is completed.
+         *
+         * This class uses a [Mutex] to ensure thread-safety for the transaction's operations.
+         * It includes methods for committing, rolling back, and executing queries within
+         * the scope of the transaction.
+         */
+        inner class Tx(
+            private var connection: R2dbcConnection,
+            private val closeConnectionAfterTx: Boolean,
+        ) : Transaction {
+
+            private val _invalidationScope = TransactionTableInvalidationScope(this@Cn)
+            override val invalidationScope: TableInvalidationScope
+                get() = _invalidationScope
+            private val mutex = Mutex()
+            private var _status: Transaction.Status = Transaction.Status.Open
+            override val status: Transaction.Status get() = _status
+
+            override suspend fun commit(): Result<Unit> = runCatching {
+                mutex.withLock {
+                    assertIsOpen()
+                    _status = Transaction.Status.Closed
+                    try {
+                        connection.commitTransaction().awaitFirstOrNull()
+                        _invalidationScope.commit()
+                    } catch (e: Exception) {
+                        SQLError(SQLError.Code.Database, e.message).ex()
+                    } finally {
+                        if (closeConnectionAfterTx) connection.close().awaitFirstOrNull()
+                    }
                 }
             }
-        }
 
-        override suspend fun rollback(): Result<Unit> = runCatching {
-            mutex.withLock {
-                assertIsOpen()
-                _status = Transaction.Status.Closed
-                try {
-                    connection.rollbackTransaction().awaitFirstOrNull()
-                } catch (e: Exception) {
-                    SQLError(SQLError.Code.Database, e.message).ex()
-                } finally {
-                    if (closeConnectionAfterTx) connection.close().awaitFirstOrNull()
+            override suspend fun rollback(): Result<Unit> = runCatching {
+                mutex.withLock {
+                    assertIsOpen()
+                    _status = Transaction.Status.Closed
+                    try {
+                        connection.rollbackTransaction().awaitFirstOrNull()
+                        _invalidationScope.rollback()
+                    } catch (e: Exception) {
+                        SQLError(SQLError.Code.Database, e.message).ex()
+                    } finally {
+                        if (closeConnectionAfterTx) connection.close().awaitFirstOrNull()
+                    }
                 }
             }
-        }
 
-        override suspend fun execute(sql: String): Result<Long> = runCatching {
-            mutex.withLock {
-                assertIsOpen()
-                @Suppress("SqlSourceToSinkFlow")
-                connection.createStatement(sql).execute().awaitSingle().rowsUpdated.awaitFirstOrNull() ?: 0
+            override suspend fun execute(sql: String): Result<Long> = runCatching {
+                mutex.withLock {
+                    assertIsOpen()
+                    @Suppress("SqlSourceToSinkFlow")
+                    connection.createStatement(sql).execute().awaitSingle().rowsUpdated.awaitFirstOrNull() ?: 0
+                }
             }
-        }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
+            override suspend fun execute(statement: Statement): Result<Long> =
+                execute(statement.render(encoders))
 
-        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
-            return mutex.withLock {
-                assertIsOpen()
-                @Suppress("SqlSourceToSinkFlow")
-                connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult()
+            override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+                return mutex.withLock {
+                    assertIsOpen()
+                    @Suppress("SqlSourceToSinkFlow")
+                    connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult()
+                }
             }
+
+            override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
+                fetchAll(statement.render(encoders))
+
+            override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
+                fetchAll(statement.render(encoders), rowMapper)
         }
-
-        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-            fetchAll(statement.render(encoders))
-
-        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-            fetchAll(statement.render(encoders), rowMapper)
     }
 
     companion object {

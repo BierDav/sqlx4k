@@ -5,6 +5,8 @@ package io.github.smyrgeorge.sqlx4k.impl.pool
 import io.github.smyrgeorge.sqlx4k.Connection
 import io.github.smyrgeorge.sqlx4k.ConnectionPool
 import io.github.smyrgeorge.sqlx4k.SQLError
+import io.github.smyrgeorge.sqlx4k.TableInvalidationScope
+import io.github.smyrgeorge.sqlx4k.impl.invalidation.DefaultTableInvalidationScope
 import io.github.smyrgeorge.sqlx4k.impl.logging.Logger
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
@@ -36,6 +38,8 @@ class ConnectionPoolImpl(
     private val log: Logger? = null,
     private val connectionFactory: ConnectionFactory,
 ) : ConnectionPool {
+    override val invalidationScope: TableInvalidationScope = DefaultTableInvalidationScope()
+
     internal var closed = AtomicBoolean(false)
     internal val idleCount = AtomicInt(0)
     internal val totalConnections = AtomicInt(0)
@@ -305,6 +309,7 @@ class ConnectionPoolImpl(
             }
         }
     }
+
 
     companion object {
         private val CLEANUP_INTERVAL = 2.seconds

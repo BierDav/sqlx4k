@@ -1,15 +1,21 @@
 package io.github.smyrgeorge.sqlx4k.processor
 
+import io.github.smyrgeorge.sqlx4k.annotation.Column
+import io.github.smyrgeorge.sqlx4k.annotation.Id
+import io.github.smyrgeorge.sqlx4k.annotation.Query
+import io.github.smyrgeorge.sqlx4k.annotation.Repository
+import io.github.smyrgeorge.sqlx4k.annotation.Table
+
 /**
  * Centralized fully qualified names used by codegen processors to avoid magic strings.
  */
 object TypeNames {
     // Annotations
-    const val REPOSITORY_ANNOTATION = "io.github.smyrgeorge.sqlx4k.annotation.Repository"
-    const val TABLE_ANNOTATION = "io.github.smyrgeorge.sqlx4k.annotation.Table"
-    const val ID_ANNOTATION = "io.github.smyrgeorge.sqlx4k.annotation.Id"
-    const val COLUMN_ANNOTATION = "io.github.smyrgeorge.sqlx4k.annotation.Column"
-    const val QUERY_ANNOTATION = "io.github.smyrgeorge.sqlx4k.annotation.Query"
+    val REPOSITORY_ANNOTATION = Repository::class.qualifiedName!!
+    val TABLE_ANNOTATION = Table::class.qualifiedName!!
+    val ID_ANNOTATION = Id::class.qualifiedName!!
+    val COLUMN_ANNOTATION = Column::class.qualifiedName!!
+    val QUERY_ANNOTATION = Query::class.qualifiedName!!
 
     // Core interfaces/classes
     const val CRUD_REPOSITORY = "io.github.smyrgeorge.sqlx4k.CrudRepository"

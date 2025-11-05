@@ -1,7 +1,12 @@
 package io.github.smyrgeorge.sqlx4k.postgres.pgmq.r2dbc
 
+import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.ResultSet
+import io.github.smyrgeorge.sqlx4k.RowMapper
+import io.github.smyrgeorge.sqlx4k.Statement
+import io.github.smyrgeorge.sqlx4k.TableInvalidationScope
 import io.github.smyrgeorge.sqlx4k.Transaction
+import io.github.smyrgeorge.sqlx4k.postgres.IPostgresNotifications
 import io.github.smyrgeorge.sqlx4k.postgres.Notification
 import io.github.smyrgeorge.sqlx4k.postgres.PostgreSQLImpl
 import io.github.smyrgeorge.sqlx4k.postgres.pgmq.PgMqDbAdapter
@@ -21,11 +26,19 @@ import io.r2dbc.postgresql.PostgresqlConnectionFactory
  */
 class PgMqDbAdapterR2dbc(
     private val connectionFactory: PostgresqlConnectionFactory,
-    pool: ConnectionPool
-) : PgMqDbAdapter {
-    private val adapter = PostgreSQLImpl(connectionFactory, pool)
-    override suspend fun listen(channel: String, f: suspend (Notification) -> Unit) = adapter.listen(channel, f)
-    override suspend fun begin(): Result<Transaction> = adapter.begin()
+    pool: ConnectionPool,
+    private val adapter: PostgreSQLImpl = PostgreSQLImpl(connectionFactory, pool)
+) : PgMqDbAdapter,
+    QueryExecutor.Transactional by adapter,
+    IPostgresNotifications by adapter {
+
     override suspend fun execute(sql: String): Result<Long> = adapter.execute(sql)
+
     override suspend fun fetchAll(sql: String): Result<ResultSet> = adapter.fetchAll(sql)
+
+    override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
+        adapter.fetchAll(statement, rowMapper)
+
+    override val invalidationScope: TableInvalidationScope
+        get() = adapter.invalidationScope
 }

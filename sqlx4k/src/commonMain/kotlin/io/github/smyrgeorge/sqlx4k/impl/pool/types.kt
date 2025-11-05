@@ -1,6 +1,7 @@
 package io.github.smyrgeorge.sqlx4k.impl.pool
 
 import io.github.smyrgeorge.sqlx4k.Connection
+import io.github.smyrgeorge.sqlx4k.ConnectionPool
 
 /**
  * Represents a factory function for creating a new database connection.
@@ -15,4 +16,4 @@ import io.github.smyrgeorge.sqlx4k.Connection
  * @see Connection
  * @see ConnectionPoolImpl
  */
-typealias ConnectionFactory = suspend () -> Connection
+typealias ConnectionFactory = suspend ConnectionPool.() -> Connection

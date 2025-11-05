@@ -8,6 +8,7 @@ package io.github.smyrgeorge.sqlx4k
  * of SQL queries and retrieval of results within a transactional context.
  */
 interface Transaction : QueryExecutor {
+
     val status: Status
 
     /**

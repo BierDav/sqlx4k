@@ -5,7 +5,12 @@ import net.sf.jsqlparser.parser.CCJSqlParserUtil
 import net.sf.jsqlparser.statement.alter.Alter
 import net.sf.jsqlparser.statement.alter.AlterOperation
 import net.sf.jsqlparser.statement.create.table.CreateTable
+import net.sf.jsqlparser.statement.delete.Delete
 import net.sf.jsqlparser.statement.drop.Drop
+import net.sf.jsqlparser.statement.insert.Insert
+import net.sf.jsqlparser.statement.select.Select
+import net.sf.jsqlparser.statement.update.Update
+import net.sf.jsqlparser.util.TablesNamesFinder
 import org.apache.calcite.adapter.java.JavaTypeFactory
 import org.apache.calcite.config.CalciteConnectionConfigImpl
 import org.apache.calcite.config.Lex
@@ -55,6 +60,38 @@ object SqlValidator {
         } catch (e: Exception) {
             val cause = e.message?.removePrefix("net.sf.jsqlparser.parser.ParseException: ")
             error("Invalid SQL syntax ($fn): $cause")
+        }
+    }
+
+    data class AnalysisResult(
+        val dependentTables: List<String>,
+        val type: StatementType,
+    )
+
+    enum class StatementType {
+        SELECT, INSERT, UPDATE, DELETE, OTHER
+    }
+
+    fun analyseQuery(sql: String): AnalysisResult? {
+        try {
+            // 1. Parse the SQL statement
+            val statement = CCJSqlParserUtil.parse(sql);
+
+            // 2. Identify the operation type
+            val type = when (statement) {
+                is Select -> StatementType.SELECT
+                is Insert -> StatementType.INSERT
+                is Update -> StatementType.UPDATE
+                is Delete -> StatementType.DELETE
+                else -> StatementType.OTHER
+            }
+
+            // 3. Find all dependent tables
+            val tablesNamesFinder = TablesNamesFinder.findTables(sql).toList();
+            return AnalysisResult(dependentTables = tablesNamesFinder, type = type)
+
+        } catch (e: Throwable) {
+            return null
         }
     }
 

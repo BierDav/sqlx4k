@@ -4,6 +4,7 @@ import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.ResultSet
 import io.github.smyrgeorge.sqlx4k.RowMapper
 import io.github.smyrgeorge.sqlx4k.Statement
+import io.github.smyrgeorge.sqlx4k.postgres.IPostgresNotifications
 import io.github.smyrgeorge.sqlx4k.postgres.Notification
 
 /**
@@ -14,8 +15,7 @@ import io.github.smyrgeorge.sqlx4k.postgres.Notification
  * executing statements and retrieving results, and the `QueryExecutor.Transactional` interface
  * for managing transactions.
  */
-interface PgMqDbAdapter : QueryExecutor, QueryExecutor.Transactional {
-    suspend fun listen(channel: String, f: suspend (Notification) -> Unit)
+interface PgMqDbAdapter : QueryExecutor, QueryExecutor.Transactional, IPostgresNotifications {
     override suspend fun execute(statement: Statement): Result<Long> = execute(statement.render(encoders))
     override suspend fun fetchAll(statement: Statement): Result<ResultSet> = fetchAll(statement.render(encoders))
     override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =

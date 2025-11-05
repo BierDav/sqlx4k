@@ -93,13 +93,6 @@ class SQLite(
     override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
         fetchAll(statement.render(encoders), rowMapper)
 
-    override suspend fun begin(): Result<Transaction> = runCatching {
-        sqlx { c -> sqlx4k_tx_begin(rt, c, DriverNativeUtils.fn) }.use {
-            it.throwIfError()
-            Tx(rt, it.tx!!)
-        }
-    }
-
     /**
      * Represents a native database connection that implements the `Connection` interface.
      *
@@ -114,8 +107,9 @@ class SQLite(
      */
     class Cn(
         private val rt: CPointer<out CPointed>,
-        private val cn: CPointer<out CPointed>
-    ) : Connection {
+        private val cn: CPointer<out CPointed>,
+        parentInvalidationScopeProvider: TableInvalidationScopeProvider
+    ) : CnBase(parentInvalidationScopeProvider) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status

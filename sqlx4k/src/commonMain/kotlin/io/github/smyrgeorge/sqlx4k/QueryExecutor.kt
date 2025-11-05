@@ -11,7 +11,8 @@ import kotlin.time.Duration
  * transactions. It abstracts the underlying database operations and offers a coroutine-based
  * API for asynchronous execution.
  */
-interface QueryExecutor {
+interface QueryExecutor : TableInvalidationScopeProvider {
+
     /**
      * Executes the given SQL statement asynchronously.
      *

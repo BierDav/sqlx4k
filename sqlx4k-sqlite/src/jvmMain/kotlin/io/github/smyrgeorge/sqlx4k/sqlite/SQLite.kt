@@ -1,6 +1,7 @@
 package io.github.smyrgeorge.sqlx4k.sqlite
 
 import io.github.smyrgeorge.sqlx4k.*
+import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
 import io.github.smyrgeorge.sqlx4k.impl.pool.ConnectionPoolImpl
@@ -34,7 +35,7 @@ import java.sql.ResultSet as JdbcResultSet
 class SQLite(
     url: String,
     options: ConnectionPool.Options = ConnectionPool.Options(),
-) : ISQLite {
+) : ISQLite, DriverBase() {
     private val pool: ConnectionPoolImpl = createConnectionPool(url, options)
 
     override suspend fun migrate(
@@ -118,8 +119,9 @@ class SQLite(
      * @property connection The underlying JDBC `Connection` used for executing database queries and transactions.
      */
     class Cn(
-        private val connection: JdbcConnection
-    ) : Connection {
+        private val connection: JdbcConnection,
+        parentInvalidationScopeProvider: TableInvalidationScopeProvider
+    ) : CnBase(parentInvalidationScopeProvider) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
@@ -176,7 +178,7 @@ class SQLite(
                     } catch (e: Exception) {
                         SQLError(SQLError.Code.Database, e.message).ex()
                     }
-                    Tx(connection, false)
+                    Tx(connection, false, this@Cn)
                 }
             }
         }
@@ -197,8 +199,9 @@ class SQLite(
      */
     class Tx(
         private var connection: JdbcConnection,
-        private val closeConnectionAfterTx: Boolean
-    ) : Transaction {
+        private val closeConnectionAfterTx: Boolean,
+        parentInvalidationScopeProvider: TableInvalidationScopeProvider
+    ) : TxBase(parentInvalidationScopeProvider) {
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
         override val status: Transaction.Status get() = _status
@@ -324,12 +327,11 @@ class SQLite(
                 )
             }
 
-            // Connection factory that creates JDBC connections
-            val connectionFactory: suspend () -> Connection = {
+            return ConnectionPoolImpl(options, null) {
                 withContext(Dispatchers.IO) {
                     val connection = DriverManager.getConnection(jdbcUrl)
                     connection.autoCommit = true
-                    Cn(connection).apply {
+                    Cn(connection, this@ConnectionPoolImpl).apply {
                         // Enable WAL mode for file-based databases to improve concurrency
                         // In-memory databases don't support WAL mode
                         if (!isInMemory) {
@@ -338,8 +340,6 @@ class SQLite(
                     }
                 }
             }
-
-            return ConnectionPoolImpl(options, null, connectionFactory)
         }
     }
 }
