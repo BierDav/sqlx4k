@@ -4,7 +4,10 @@ import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*
 import com.google.devtools.ksp.validate
 import io.github.smyrgeorge.sqlx4k.Statement
+import io.github.smyrgeorge.sqlx4k.annotation.Query
+import kotlinx.coroutines.flow.Flow
 import java.io.OutputStream
+import kotlin.reflect.KClass
 
 class RepositoryProcessor(
     private val options: Map<String, String>,
@@ -61,6 +64,7 @@ class RepositoryProcessor(
         file += "package $outputPackage\n\n"
         file += "import ${TypeNames.STATEMENT}\n"
         file += "import ${TypeNames.QUERY_EXECUTOR}\n"
+        file += "import ${TypeNames.LISTEN_FOR_INVALIDATION}\n"
 
         // For each repository interface, find methods annotated with @Query
         val validatedRepos = repoSymbols.filter { it.validate() }
@@ -102,7 +106,8 @@ class RepositoryProcessor(
                         validateSchema = doCheckSchema,
                         mapperTypeName = mapperTypeName,
                         domainDecl = domainDecl,
-                        useContextParameters = useContextParameters
+                        useContextParameters = useContextParameters,
+                        tableLookup = tableLookup,
                     )
                 }
 
@@ -112,7 +117,8 @@ class RepositoryProcessor(
                 file = file,
                 domainDecl = domainDecl,
                 mapperTypeName = mapperTypeName,
-                useContextParameters = useContextParameters
+                useContextParameters = useContextParameters,
+                tableLookup = tableLookup,
             )
             file += "}\n"
         }
@@ -145,12 +151,17 @@ class RepositoryProcessor(
      */
     private enum class Prefix {
         FIND_ONE_BY,
+        FIND_ONE_BY_FLOW,
         FIND_ALL_BY,
+        FIND_ALL_BY_FLOW,
         FIND_ALL,
+        FIND_ALL_FLOW,
         DELETE_BY,
         DELETE_ALL,
         COUNT_BY,
+        COUNT_BY_FLOW,
         COUNT_ALL,
+        COUNT_ALL_FLOW,
         EXECUTE
     }
 
@@ -166,11 +177,16 @@ class RepositoryProcessor(
      */
     private fun parseMethodPrefix(name: String): Prefix = when {
         name == "findAll" -> Prefix.FIND_ALL
+        name == "findAllFlow" -> Prefix.FIND_ALL_FLOW
         name == "deleteAll" -> Prefix.DELETE_ALL
         name == "countAll" -> Prefix.COUNT_ALL
+        name == "countAllFlow" -> Prefix.COUNT_ALL_FLOW
+        name.startsWith("findAllBy") && name.endsWith("Flow") -> Prefix.FIND_ALL_BY_FLOW
         name.startsWith("findAllBy") -> Prefix.FIND_ALL_BY
+        name.startsWith("findOneBy") && name.endsWith("Flow") -> Prefix.FIND_ONE_BY_FLOW
         name.startsWith("findOneBy") -> Prefix.FIND_ONE_BY
         name.startsWith("deleteBy") -> Prefix.DELETE_BY
+        name.startsWith("countBy") && name.endsWith("Flow") -> Prefix.COUNT_BY_FLOW
         name.startsWith("countBy") -> Prefix.COUNT_BY
         name.startsWith("execute") -> Prefix.EXECUTE
         else -> error("Invalid repository method name '$name'. Must be one of: findAll, deleteAll, countAll or start with: findAllBy, findOneBy, deleteBy, countBy, execute.")
@@ -260,23 +276,23 @@ class RepositoryProcessor(
                 qn == TypeNames.QUERY_EXECUTOR && pName == "context"
             }
             if (hasExplicitContextParam) {
-                error("Repository method '$name' must not declare parameter 'context: ${TypeNames.QUERY_EXECUTOR}' when using context parameters")
+                error("${fn.getLocationLink()}: Repository method '$name' must not declare parameter 'context: ${TypeNames.QUERY_EXECUTOR}' when using context parameters")
             }
             return
         }
         // Non-context-parameters mode: the first parameter must be 'context: QueryExecutor'
         if (params.isEmpty())
-            error("Repository method '$name' must declare first parameter 'context: ${TypeNames.QUERY_EXECUTOR}'")
+            error("${fn.getLocationLink()}: Repository method '$name' must declare first parameter 'context: ${TypeNames.QUERY_EXECUTOR}'")
         val first = params.first()
         val firstName = first.name?.asString()
-            ?: error("Repository method '$name' first parameter must be named 'context'")
+            ?: error("${fn.getLocationLink()}: Repository method '$name' first parameter must be named 'context'")
         if (firstName != "context")
-            error("Repository method '$name' first parameter must be named 'context'")
+            error("${fn.getLocationLink()}: Repository method '$name' first parameter must be named 'context'")
         val firstType = first.type.resolve()
         val firstQn = firstType.declaration.qualifiedName()
-            ?: error("Unable to resolve type of first parameter for method '$name'")
+            ?: error("${fn.getLocationLink()}: Unable to resolve type of first parameter for method '$name'")
         if (firstQn != TypeNames.QUERY_EXECUTOR || firstType.isMarkedNullable)
-            error("Repository method '$name' first parameter must be non-null ${TypeNames.QUERY_EXECUTOR}")
+            error("${fn.getLocationLink()}: Repository method '$name' first parameter must be non-null ${TypeNames.QUERY_EXECUTOR}")
     }
 
     /**
@@ -293,49 +309,90 @@ class RepositoryProcessor(
     ) {
         val name = fn.simpleName()
         val returnType = fn.returnType?.resolve()
-            ?: error("Unable to resolve return type for method '$name'")
-        val resultQName = returnType.declaration.qualifiedName()
-            ?: error("Unable to resolve return type declaration for method '$name'")
-        if (resultQName != TypeNames.KOTLIN_RESULT)
-            error("Repository method '$name' must return kotlin.Result<...> but returns '$returnType'")
-        val r0 = returnType.arguments.firstOrNull()?.type?.resolve()
-            ?: error("Repository method '$name' must return kotlin.Result<...> with a type argument")
+            ?: error("${fn.getLocationLink()}: Unable to resolve return type for method '$name'")
+
+        fun ensureResult(inner: KSType, isFlow: Boolean): KSType {
+            val expectedType = if(isFlow) "${Flow::class.qualifiedName}<${Result::class.qualifiedName}<...>>" else "${Result::class.qualifiedName}<...>"
+            var start = inner
+            if (isFlow) {
+                if (inner.declaration.qualifiedName() != TypeNames.KOTLIN_FLOW || inner.isMarkedNullable)
+                    error("${fn.getLocationLink()}: Repository method '$name' must return $expectedType but returns '$returnType'")
+                start = returnType.arguments.firstOrNull()?.type?.resolve()
+                    ?: error("${fn.getLocationLink()}: Repository method '$name' must return $expectedType with a type argument")
+            }
+            val resultQName = start.declaration.qualifiedName()
+                ?: error("${fn.getLocationLink()}: Unable to resolve return type declaration for method '$name'")
+            if (resultQName != TypeNames.KOTLIN_RESULT)
+                error("${fn.getLocationLink()}: Repository method '$name' must return $expectedType but returns '$returnType'")
+            val result = start.arguments.firstOrNull()?.type?.resolve()
+                ?: error("${fn.getLocationLink()}: Repository method '$name' must return $expectedType with a type argument")
+            return result
+        }
 
         fun ensureDomain(inner: KSType, allowNullable: Boolean) {
             val innerDecl = inner.declaration as? KSClassDeclaration
-                ?: error("Unable to resolve inner domain type for method '$name'")
+                ?: error("${fn.getLocationLink()}: Unable to resolve inner domain type for method '$name'")
             val innerQn = innerDecl.qualifiedName()
-                ?: error("Unable to resolve inner domain type name for method '$name'")
+                ?: error("${fn.getLocationLink()}: Unable to resolve inner domain type name for method '$name'")
             val domainQn = domainDecl.qualifiedName()
-                ?: error("Unable to resolve repository domain type name")
+                ?: error("${fn.getLocationLink()}: Unable to resolve repository domain type name")
             if (innerQn != domainQn)
-                error("Method '$name' must use repository domain type '$domainQn' but found '$innerQn'")
+                error("${fn.getLocationLink()}: Method '$name' must use repository domain type '$domainQn' but found '$innerQn'")
             if (!allowNullable && inner.isMarkedNullable)
-                error("Method '$name' domain return type must be non-nullable")
+                error("${fn.getLocationLink()}: Method '$name' domain return type must be non-nullable")
         }
 
         when (prefix) {
             Prefix.FIND_ALL, Prefix.FIND_ALL_BY -> {
+                val r0 = ensureResult(returnType, false)
                 val listQn = r0.declaration.qualifiedName()
-                    ?: error("Unable to resolve inner type for method '$name'")
+                    ?: error("${fn.getLocationLink()}: Unable to resolve inner type for method '$name'")
                 if (listQn != TypeNames.KOTLIN_LIST || r0.isMarkedNullable)
-                    error("Method '$name' must return Result<List<T>> where T is the repository domain type")
+                    error("${fn.getLocationLink()}: Method '$name' must return Result<List<T>> where T is the repository domain type")
                 val tArg = r0.arguments.firstOrNull()?.type?.resolve()
-                    ?: error("Method '$name' must return Result<List<T>> with a generic argument")
+                    ?: error("${fn.getLocationLink()}: Method '$name' must return Result<List<T>> with a generic argument")
+                ensureDomain(tArg, allowNullable = false)
+            }
+
+            Prefix.FIND_ALL_FLOW, Prefix.FIND_ALL_BY_FLOW -> {
+                val r0 = ensureResult(returnType, true)
+                if (r0.declaration.qualifiedName() != TypeNames.KOTLIN_LIST || r0.isMarkedNullable)
+                    error("${fn.getLocationLink()}: Method '$name' must return Flow<Result<List<T>>> where T is the repository domain type")
+                val tArg = r0.arguments.firstOrNull()?.type?.resolve()
+                    ?: error("${fn.getLocationLink()}: Method '$name' must return Flow<Result<List<T>>> with a generic argument")
                 ensureDomain(tArg, allowNullable = false)
             }
 
             Prefix.FIND_ONE_BY -> {
+                val r0 = ensureResult(returnType, false)
                 ensureDomain(r0.makeNotNullable(), allowNullable = true)
                 if (!r0.isMarkedNullable)
-                    error("Method '$name' must return Result<T?> where T is the repository domain type")
+                    error("${fn.getLocationLink()}: Method '$name' must return Result<T?> where T is the repository domain type")
+            }
+
+            Prefix.FIND_ONE_BY_FLOW -> {
+                val r0 = ensureResult(returnType, true)
+                if (r0.declaration.qualifiedName() != TypeNames.KOTLIN_FLOW || r0.isMarkedNullable)
+                    error("${fn.getLocationLink()}: Method '$name' must return Flow<Result<List<T>>> where T is the repository domain type")
+                val tArg = r0.arguments.firstOrNull()?.type?.resolve()
+                    ?: error("${fn.getLocationLink()}: Method '$name' must return Flow<Result<List<T>>> with a generic argument")
+                ensureDomain(tArg.makeNotNullable(), allowNullable = true)
+                if (!tArg.isMarkedNullable)
+                    error("${fn.getLocationLink()}: Method '$name' must return Flow<Result<T?>> where T is the repository domain type")
             }
 
             Prefix.DELETE_ALL, Prefix.COUNT_ALL, Prefix.DELETE_BY, Prefix.COUNT_BY, Prefix.EXECUTE -> {
+                val r0 = ensureResult(returnType, false)
                 val qn0 = r0.declaration.qualifiedName()
-                    ?: error("Unable to resolve inner type for method '$name'")
+                    ?: error("${fn.getLocationLink()}: Unable to resolve inner type for method '$name'")
                 if (qn0 != TypeNames.KOTLIN_LONG || r0.isMarkedNullable)
-                    error("Method '$name' with prefix '${prefix.name.lowercase()}' must return kotlin.Result<kotlin.Long>")
+                    error("${fn.getLocationLink()}: Method '$name' with prefix '${prefix.name.lowercase()}' must return Result<Long>")
+            }
+
+            Prefix.COUNT_ALL_FLOW, Prefix.COUNT_BY_FLOW -> {
+                val r0 = ensureResult(returnType, true)
+                if (r0.declaration.qualifiedName() != TypeNames.KOTLIN_LONG || r0.isMarkedNullable)
+                    error("${fn.getLocationLink()}: Method '$name' with prefix '${prefix.name.lowercase()}' must return Flow<Result<Long>>")
             }
         }
     }
@@ -357,9 +414,17 @@ class RepositoryProcessor(
         val params = fn.parameters
         val nonContextCount = if (useContextParameters) params.size else params.size - 1
         when (prefix) {
-            Prefix.FIND_ALL, Prefix.DELETE_ALL, Prefix.COUNT_ALL -> if (nonContextCount != 0) error("Method '$name' must not have parameters other than context")
-            Prefix.FIND_ALL_BY, Prefix.FIND_ONE_BY, Prefix.DELETE_BY, Prefix.COUNT_BY -> if (nonContextCount < 1) error(
-                "Method '$name' must have more than one argument (at least one after context)"
+            Prefix.FIND_ALL, Prefix.FIND_ALL_FLOW,
+            Prefix.COUNT_ALL, Prefix.COUNT_ALL_FLOW,
+            Prefix.DELETE_ALL,
+                -> if (nonContextCount != 0) error("${fn.getLocationLink()}: Method '$name' must not have parameters other than context")
+
+            Prefix.FIND_ALL_BY, Prefix.FIND_ALL_BY_FLOW,
+            Prefix.FIND_ONE_BY, Prefix.FIND_ONE_BY_FLOW,
+            Prefix.COUNT_BY, Prefix.COUNT_BY_FLOW,
+            Prefix.DELETE_BY,
+                -> if (nonContextCount < 1) error(
+                "${fn.getLocationLink()}: Method '$name' must have more than one argument (at least one after context)"
             )
 
             Prefix.EXECUTE -> {}
@@ -382,7 +447,7 @@ class RepositoryProcessor(
      * - Any method parameter is missing a corresponding named parameter in the SQL query.
      * - Any method parameter lacks a name.
      */
-    fun validateParameters(
+    private fun validateParameters(
         sql: String,
         fn: KSFunctionDeclaration,
         useContextParameters: Boolean
@@ -390,16 +455,40 @@ class RepositoryProcessor(
         val name = fn.simpleName()
         val statement = Statement.create(sql)
         if (statement.extractedPositionalParameters > 0)
-            error("Method '$name' uses positional parameters in @Query (only named parameters are supported).")
+            error("${fn.getLocationLink()}: Method '$name' uses positional parameters in @Query (only named parameters are supported).")
         // Exclude 'context' argument.
         val parameters = if (useContextParameters) fn.parameters else fn.parameters.drop(1)
         if (parameters.size != statement.extractedNamedParameters.size)
-            error("Method '$name' has ${parameters.size} parameters but @Query statement has ${statement.extractedNamedParameters.size} named parameters.")
+            error("${fn.getLocationLink()}: Method '$name' has ${parameters.size} parameters but @Query statement has ${statement.extractedNamedParameters.size} named parameters.")
         parameters.forEach { p ->
             val pName = p.name?.asString()
-                ?: error("All query parameters must be named when using namedParameters support")
+                ?: error("${fn.getLocationLink()}: All query parameters must be named when using namedParameters support")
             if (!statement.extractedNamedParameters.contains(pName))
-                error("Method '$name' has parameter '$pName' but @Query statement does not contain a named parameter with that name.")
+                error("${fn.getLocationLink()}: Method '$name' has parameter '$pName' but @Query statement does not contain a named parameter with that name.")
+        }
+    }
+
+    private fun validateModifiers(
+        prefix: Prefix,
+        fn: KSFunctionDeclaration
+    ) {
+        val name = fn.simpleName()
+        val isSuspending = fn.modifiers.contains(Modifier.SUSPEND)
+        when (prefix) {
+            Prefix.FIND_ALL, Prefix.FIND_ALL_BY, Prefix.FIND_ONE_BY,
+            Prefix.COUNT_ALL, Prefix.COUNT_BY,
+            Prefix.DELETE_ALL, Prefix.DELETE_BY,
+            Prefix.EXECUTE
+                ->
+                if (!isSuspending)
+                    error("${fn.getLocationLink()}: Method '$name' must be suspending")
+
+            Prefix.FIND_ALL_FLOW, Prefix.FIND_ALL_BY_FLOW,
+            Prefix.COUNT_ALL_FLOW, Prefix.FIND_ONE_BY_FLOW,
+            Prefix.COUNT_BY_FLOW -> {
+                if (isSuspending)
+                    error("${fn.getLocationLink()}: Method '$name' mustn't be suspending")
+            }
         }
     }
 
@@ -439,13 +528,15 @@ class RepositoryProcessor(
         validateSchema: Boolean,
         mapperTypeName: String,
         domainDecl: KSClassDeclaration,
-        useContextParameters: Boolean
+        useContextParameters: Boolean,
+        tableLookup: TableLookup
     ) {
         val name = fn.simpleName()
         val prefix: Prefix = parseMethodPrefix(name)
         logger.info("[RepositoryProcessor] Generating @Query method: $name")
 
-        val sql: String = fn.annotations.first { it.qualifiedName() == TypeNames.QUERY_ANNOTATION }
+        val queryAnnotation = fn.annotations.first { it.qualifiedName() == TypeNames.QUERY_ANNOTATION }
+        val sql: String = queryAnnotation
             .arguments.firstOrNull { it.name?.asString() == "value" }
             ?.value as? String
             ?: error("Unable to generate query method (could not extract sql query from the @Query): $fn")
@@ -457,15 +548,44 @@ class RepositoryProcessor(
             "$pName: $pType"
         }
 
+        validateModifiers(prefix, fn)
         validateContextParameter(fn, useContextParameters)
         validateParameterArity(prefix, fn, useContextParameters)
         validateParameters(sql, fn, useContextParameters)
         validateReturnType(prefix, fn, domainDecl)
         if (validateSyntax) SqlValidator.validateQuerySyntax(fn.simpleName(), sql)
         if (validateSchema) SqlValidator.validateQuerySchema(fn.simpleName(), sql)
+
         val analysis = SqlValidator.analyseQuery(sql)
         if (analysis == null)
-            logger.warn("Unable to analyze SQL query (${fn.simpleName()}): $sql")
+            logger.warn("[RepositoryProcessor] Unable to analyze SQL query (${fn.simpleName()}): $sql")
+
+        val isIndependent = (queryAnnotation.arguments
+            .firstOrNull { it.name?.asString() == Query::isIndependent.name }
+            ?.value as? Boolean) ?: false
+        val explicitDependentTables = queryAnnotation.arguments
+            .firstOrNull { it.name?.asString() == Query::explicitDependentTables.name }
+            ?.value as? Array<KClass<*>>
+        if (isIndependent && explicitDependentTables != null && explicitDependentTables.isNotEmpty())
+            error("Query marked as independent mustn't specify explicitDependentTables: $fn")
+        var dependentTables = explicitDependentTables?.mapNotNull { it.qualifiedName }
+        
+        if (dependentTables == null) {
+            dependentTables = analysis?.dependentTables?.mapNotNull {
+                val result = tableLookup[it]
+                if (result == null)
+                    logger.warn("[RepositoryProcessor] Unable to find dependent table with name $it. Check your @Table annotation. Mind that names are case-sensitive.")
+                result?.qualifiedName()
+            }
+
+            if (dependentTables != null && dependentTables.isEmpty())
+                logger.warn("[RepositoryProcessor] Query analysis returned no dependent tables. Please provide explicit dependencies (${fn.simpleName()}): $sql")
+
+        }
+        
+        var dependentTablesArg = ""
+        if (!isIndependent && dependentTables != null && dependentTables.isNotEmpty())
+            dependentTablesArg = dependentTables.joinToString(", ") { "$it::class" }
 
         logger.info("[RepositoryProcessor] Emitting method '$name' with prefix ${prefix.name} in ${domainDecl.qualifiedName()} using mapper $mapperTypeName")
 
@@ -484,9 +604,12 @@ class RepositoryProcessor(
         }
         val returnDesc = when (prefix) {
             Prefix.FIND_ALL, Prefix.FIND_ALL_BY -> "Result containing list of ${domainDecl.simpleName()} entities"
+            Prefix.FIND_ALL_FLOW, Prefix.FIND_ALL_BY_FLOW -> "Result containing a flow which emits a list of ${domainDecl.simpleName()} entities once and everytime the underlying table gets invalidated"
             Prefix.FIND_ONE_BY -> "Result containing a single ${domainDecl.simpleName()} entity or null if not found"
+            Prefix.FIND_ONE_BY_FLOW -> "Flow that emits a Result containing a single ${domainDecl.simpleName()} entity or null if not found once and everytime the underlying table gets invalidated"
             Prefix.DELETE_ALL, Prefix.DELETE_BY, Prefix.EXECUTE -> "Result containing the number of affected rows"
             Prefix.COUNT_ALL, Prefix.COUNT_BY -> "Result containing the count"
+            Prefix.COUNT_ALL_FLOW, Prefix.COUNT_BY_FLOW -> "Flow that emits a Result containing the count once and everytime the underlying table gets invalidated"
         }
         file += "     * @return $returnDesc, or an error if the operation fails\n"
         file += "     */\n"
@@ -494,7 +617,19 @@ class RepositoryProcessor(
         if (useContextParameters) {
             file += "    context(context: QueryExecutor)\n"
         }
-        file += "    override suspend fun $name($paramSig) = run {\n"
+
+        val suspendModifier = when (prefix) {
+            Prefix.FIND_ALL, Prefix.FIND_ALL_BY, Prefix.FIND_ONE_BY,
+            Prefix.COUNT_ALL, Prefix.COUNT_BY,
+            Prefix.DELETE_ALL, Prefix.DELETE_BY,
+            Prefix.EXECUTE -> "suspend "
+
+            Prefix.FIND_ALL_FLOW, Prefix.FIND_ALL_BY_FLOW,
+            Prefix.COUNT_ALL_FLOW, Prefix.FIND_ONE_BY_FLOW,
+            Prefix.COUNT_BY_FLOW -> ""
+        }
+
+        file += "    override ${suspendModifier}fun $name($paramSig) = run {\n"
         file += "        // language=SQL\n"
         file += "        val statement = Statement.create(\"$sql\")\n"
         emitNamedParameterBindings(file, params)
@@ -503,32 +638,67 @@ class RepositoryProcessor(
             if (useContextParameters) "context"
             else params.firstOrNull()?.name?.asString() ?: "context"
 
+
+
         when (prefix) {
             Prefix.FIND_ALL, Prefix.FIND_ALL_BY -> {
                 file += "        $contextParamName.fetchAll(statement, $mapperTypeName)\n"
             }
 
+            Prefix.FIND_ALL_FLOW, Prefix.FIND_ALL_BY_FLOW -> {
+                file += """        $contextParamName.listenForInvalidation(${dependentTablesArg}) { 
+                                       fetchAll(statement, $mapperTypeName) 
+                                   }
+                        """.trimIndent()
+            }
+
             Prefix.FIND_ONE_BY -> {
                 file += """        $contextParamName.fetchAll(statement, $mapperTypeName).map { list ->
-                                    when (list.size) {
-                                        0 -> null
-                                        1 -> list.first()
-                                        else -> return@run Result.failure(IllegalStateException("findOneBy query returned more than one row"))
-                                    }
-                                }
+                                       when (list.size) {
+                                           0 -> null
+                                           1 -> list.first()
+                                           else -> return@run Result.failure(IllegalStateException("findOneBy query returned more than one row"))
+                                       }
+                                   }
+                        """.trimIndent()
+            }
+
+            Prefix.FIND_ONE_BY_FLOW -> {
+                file += """        $contextParamName.listenForInvalidation(${dependentTablesArg}) {     
+                                        fetchAll(statement, $mapperTypeName).map { list ->
+                                             when (list.size) {
+                                                 0 -> null
+                                                 1 -> list.first()
+                                                 else -> return@listenForInvalidation Result.failure(IllegalStateException("findOneBy query returned more than one row"))
+                                             }
+                                        }
+                                   }
                         """.trimIndent()
             }
 
             Prefix.DELETE_ALL, Prefix.DELETE_BY, Prefix.EXECUTE -> {
                 file += "        $contextParamName.execute(statement)\n"
+                file += "        $contextParamName.invalidationScope.invalidate(${dependentTablesArg})\n"
             }
 
             Prefix.COUNT_ALL, Prefix.COUNT_BY -> {
-                file += "        $contextParamName.fetchAll(statement).map { rs ->\n"
-                file += "            val row = rs.firstOrNull()\n"
-                file += "                ?: return@run Result.failure(IllegalStateException(\"Count query returned no rows\"))\n"
-                file += "            row.get(0).asString().toLong()\n"
-                file += "        }\n"
+                file += """        $contextParamName.fetchAll(statement).map { rs ->
+                                        val row = rs.firstOrNull()
+                                            ?: return@run Result.failure(IllegalStateException("Count query returned no rows"))
+                                        row.get(0).asString().toLong()
+                                    }   
+                            """.trimIndent()
+            }
+
+            Prefix.COUNT_ALL_FLOW, Prefix.COUNT_BY_FLOW -> {
+                file += """         $contextParamName.listenForInvalidation(${dependentTablesArg}) {     
+                                        fetchAll(statement).map { rs ->
+                                            val row = rs.firstOrNull()
+                                                ?: return@listenForInvalidation Result.failure(IllegalStateException("Count query returned no rows"))
+                                            row.get(0).asString().toLong()
+                                        }
+                                    }
+                            """.trimIndent()
             }
         }
         file += "    }\n"
@@ -547,11 +717,14 @@ class RepositoryProcessor(
         file: OutputStream,
         domainDecl: KSClassDeclaration,
         mapperTypeName: String,
-        useContextParameters: Boolean
+        useContextParameters: Boolean,
+        tableLookup: TableLookup
     ) {
         val domainQn = domainDecl.qualifiedName() ?: error("Cannot resolve domain type name")
         val domainSimpleName = domainDecl.simpleName()
         logger.info("[RepositoryProcessor] Generating CRUD methods for $domainQn")
+
+        val dependentTablesArg = "$domainQn::class"
 
         // insert
         logger.info("[RepositoryProcessor] Emitting CRUD method: insert($domainQn)")
@@ -574,13 +747,16 @@ class RepositoryProcessor(
         } else {
             file += "    override suspend fun insert(context: QueryExecutor, entity: $domainQn) = run {\n"
         }
-        file += "        val statement = entity.insert()\n"
-        file += "        context.fetchAll(statement, $mapperTypeName).map { list ->\n"
-        file += "            val one = list.firstOrNull()\n"
-        file += "                ?: return@run Result.failure(IllegalStateException(\"Insert query returned no rows\"))\n"
-        file += "            one\n"
-        file += "        }\n"
-        file += "    }\n"
+        file += """        val statement = entity.insert()
+                           val result = context.fetchAll(statement, $mapperTypeName).map { list ->
+                               val one = list.firstOrNull()
+                                   ?: return@run Result.failure(IllegalStateException("Insert query returned no rows"))
+                               one
+                           }
+                           context.invalidationScope.invalidate($dependentTablesArg)
+                           result
+                       }
+                   """.trimIndent()
 
         // update
         logger.info("[RepositoryProcessor] Emitting CRUD method: update($domainQn)")
@@ -603,13 +779,16 @@ class RepositoryProcessor(
         } else {
             file += "    override suspend fun update(context: QueryExecutor, entity: $domainQn) = run {\n"
         }
-        file += "        val statement = entity.update()\n"
-        file += "        context.fetchAll(statement, $mapperTypeName).map { list ->\n"
-        file += "            val one = list.firstOrNull()\n"
-        file += "                ?: return@run Result.failure(IllegalStateException(\"Update query returned no rows\"))\n"
-        file += "            one\n"
-        file += "        }\n"
-        file += "    }\n"
+        file += """        val statement = entity.update()
+                           val result = context.fetchAll(statement, $mapperTypeName).map { list ->
+                               val one = list.firstOrNull()
+                                   ?: return@run Result.failure(IllegalStateException("Update query returned no rows"))
+                               one
+                           }
+                           context.invalidationScope.invalidate($dependentTablesArg)
+                           result
+                       }
+                   """
 
         // delete
         logger.info("[RepositoryProcessor] Emitting CRUD method: delete($domainQn)")
@@ -631,9 +810,12 @@ class RepositoryProcessor(
         } else {
             file += "    override suspend fun delete(context: QueryExecutor, entity: $domainQn) = run {\n"
         }
-        file += "        val statement = entity.delete()\n"
-        file += "        context.execute(statement).map { kotlin.Unit }\n"
-        file += "    }\n"
+        file += """        val statement = entity.delete()
+                           val result = context.execute(statement).map { kotlin.Unit }
+                           context.invalidationScope.invalidate($dependentTablesArg)
+                           result
+                       }
+                   """
 
         // save
         logger.info("[RepositoryProcessor] Emitting CRUD method: save($domainQn)")
@@ -690,6 +872,17 @@ class RepositoryProcessor(
     private fun KSFunctionDeclaration.simpleName(): String = simpleName.asString()
     private fun KSClassDeclaration.qualifiedName(): String? = qualifiedName?.asString()
     private fun KSAnnotation.qualifiedName(): String? = annotationType.resolve().declaration.qualifiedName?.asString()
+
+    /**
+     * Gets a string representation of the function's location that
+     * IntelliJ can parse as a clickable link in the build console.
+     *
+     * @return A string like "(MyFile.kt:42)"
+     */
+    fun KSFunctionDeclaration.getLocationLink(): String {
+        val file = this.containingFile ?: return "[Unknown File]"
+        return file.filePath
+    }
 
     companion object {
         /**

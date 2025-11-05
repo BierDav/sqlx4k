@@ -214,6 +214,7 @@ class SQLite(
                     try {
                         connection.commit()
                         connection.autoCommit = true
+                        invalidationScope.commit()
                     } catch (e: Exception) {
                         SQLError(SQLError.Code.Database, e.message).ex()
                     } finally {
@@ -231,6 +232,7 @@ class SQLite(
                     try {
                         connection.rollback()
                         connection.autoCommit = true
+                        invalidationScope.rollback()
                     } catch (e: Exception) {
                         SQLError(SQLError.Code.Database, e.message).ex()
                     } finally {
@@ -327,11 +329,12 @@ class SQLite(
                 )
             }
 
-            return ConnectionPoolImpl(options, null) {
+            val connectionFactory: suspend ConnectionPool.() -> Connection = {
+                val connectionPool = this
                 withContext(Dispatchers.IO) {
                     val connection = DriverManager.getConnection(jdbcUrl)
                     connection.autoCommit = true
-                    Cn(connection, this@ConnectionPoolImpl).apply {
+                    Cn(connection, connectionPool).apply {
                         // Enable WAL mode for file-based databases to improve concurrency
                         // In-memory databases don't support WAL mode
                         if (!isInMemory) {
@@ -340,6 +343,7 @@ class SQLite(
                     }
                 }
             }
+            return ConnectionPoolImpl(options, null, connectionFactory)
         }
     }
 }

@@ -4,8 +4,10 @@ import io.github.smyrgeorge.sqlx4k.ResultSet
 import io.github.smyrgeorge.sqlx4k.RowMapper
 import io.github.smyrgeorge.sqlx4k.Statement
 import io.github.smyrgeorge.sqlx4k.Transaction
+import io.github.smyrgeorge.sqlx4k.impl.invalidation.TrackOnlyTableInvalidationScope
 
 class FakeTransaction : Transaction {
+    override val invalidationScope = TrackOnlyTableInvalidationScope()
     override var status: Transaction.Status = Transaction.Status.Open
 
     override suspend fun commit(): Result<Unit> {

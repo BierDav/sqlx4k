@@ -5,6 +5,10 @@ plugins {
 }
 
 kotlin {
+    compilerOptions {
+        optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
+    }
+    compilerOptions { }
     @Suppress("unused")
     sourceSets {
         all {
@@ -17,7 +21,7 @@ kotlin {
             dependencies {
                 api(libs.kotlinx.coroutines.core)
                 api(libs.kotlinx.datetime)
-                implementation(libs.kotlinx.io.core)
+                api(libs.kotlinx.io.core)
             }
         }
         val commonTest by getting {

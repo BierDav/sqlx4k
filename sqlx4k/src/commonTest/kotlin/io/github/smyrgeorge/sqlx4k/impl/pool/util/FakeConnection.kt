@@ -1,8 +1,11 @@
 package io.github.smyrgeorge.sqlx4k.impl.pool.util
 
 import io.github.smyrgeorge.sqlx4k.*
+import io.github.smyrgeorge.sqlx4k.impl.invalidation.TrackOnlyTableInvalidationScope
+import io.github.smyrgeorge.sqlx4k.impl.invalidation.TransactionTableInvalidationScope
 
 class FakeConnection(val id: Long) : Connection {
+    override val invalidationScope = TrackOnlyTableInvalidationScope()
     override var status: Connection.Status = Connection.Status.Open
     var onClose: (() -> Unit)? = null
     private var closed = false
@@ -39,4 +42,6 @@ class FakeConnection(val id: Long) : Connection {
 
     override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
         Result.success(emptyList())
+
+
 }

@@ -5,6 +5,8 @@ import io.github.smyrgeorge.sqlx4k.annotation.Id
 import io.github.smyrgeorge.sqlx4k.annotation.Query
 import io.github.smyrgeorge.sqlx4k.annotation.Repository
 import io.github.smyrgeorge.sqlx4k.annotation.Table
+import io.github.smyrgeorge.sqlx4k.listenForInvalidation
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Centralized fully qualified names used by codegen processors to avoid magic strings.
@@ -21,11 +23,13 @@ object TypeNames {
     const val CRUD_REPOSITORY = "io.github.smyrgeorge.sqlx4k.CrudRepository"
     const val CONTEXT_CRUD_REPOSITORY = "io.github.smyrgeorge.sqlx4k.ContextCrudRepository"
     const val QUERY_EXECUTOR = "io.github.smyrgeorge.sqlx4k.QueryExecutor"
+    const val LISTEN_FOR_INVALIDATION = "io.github.smyrgeorge.sqlx4k.listenForInvalidation"
     const val STATEMENT = "io.github.smyrgeorge.sqlx4k.Statement"
 
     // Kotlin stdlib
-    const val KOTLIN_RESULT = "kotlin.Result"
-    const val KOTLIN_LIST = "kotlin.collections.List"
-    const val KOTLIN_LONG = "kotlin.Long"
-    const val KOTLIN_INT = "kotlin.Int"
+    val KOTLIN_RESULT = Result::class.qualifiedName!!
+    val KOTLIN_LIST = List::class.qualifiedName!!
+    val KOTLIN_LONG = Long::class.qualifiedName!!
+    val KOTLIN_INT = Int::class.qualifiedName!!
+    val KOTLIN_FLOW = Flow::class.qualifiedName!!
 }

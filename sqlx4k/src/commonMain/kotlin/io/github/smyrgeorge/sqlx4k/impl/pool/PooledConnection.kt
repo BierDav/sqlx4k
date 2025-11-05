@@ -13,8 +13,9 @@ import kotlin.time.TimeSource
 
 class PooledConnection(
     private val connection: Connection,
-    private val pool: ConnectionPoolImpl
-) : Connection {
+    private val pool: ConnectionPoolImpl,
+    parentInvalidationScopeProvider: TableInvalidationScopeProvider,
+) : Connection, TableInvalidationScopeProvider by parentInvalidationScopeProvider {
     private val mutex = Mutex()
     private var acquired = true
     private val released get() = !acquired

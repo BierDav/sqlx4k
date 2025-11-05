@@ -121,7 +121,7 @@ class ConnectionPoolImpl(
             if (semaphore.tryAcquire()) {
                 try {
                     val newConnection = connectionFactory()
-                    val pooled = PooledConnection(newConnection, this)
+                    val pooled = PooledConnection(newConnection, this, TODO())
                     totalConnections.incrementAndFetch()
                     return pooled.acquire()
                 } catch (e: Exception) {
@@ -219,7 +219,7 @@ class ConnectionPoolImpl(
                     return
                 }
 
-                pooled = PooledConnection(connectionFactory(), this)
+                pooled = PooledConnection(connectionFactory(), this, TODO())
                 totalConnections.incrementAndFetch()
 
                 if (!sendToIdle(pooled)) {

@@ -62,7 +62,7 @@ class PostgreSQLImpl(
     override fun poolIdleSize(): Int = pool.metrics.getOrElse { error("No metrics available.") }.idleSize()
 
     override suspend fun acquire(): Result<Connection> = runCatching {
-        Cn(pool.acquire(),invalidationScope)
+        Cn(pool.acquire(), invalidationScope, this)
     }
 
     override suspend fun execute(sql: String): Result<Long> = runCatching {
@@ -101,6 +101,18 @@ class PostgreSQLImpl(
 
     override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
         fetchAll(statement.render(encoders), rowMapper)
+
+    override suspend fun begin(): Result<Transaction> = runCatching {
+        with(pool.acquire()) {
+            try {
+                beginTransaction().awaitFirstOrNull()
+            } catch (e: Exception) {
+                close().awaitFirstOrNull()
+                SQLError(SQLError.Code.Database, e.message).ex()
+            }
+            Tx(this, true, this@PostgreSQLImpl)
+        }
+    }
 
     /**
      * Listens for notifications from a specified PostgreSQL channel.
@@ -213,10 +225,11 @@ class PostgreSQLImpl(
      * @constructor Creates an instance of `Cn` with the specified `R2dbcConnection`.
      * @property connection The underlying `R2dbcConnection` used for executing database queries and transactions.
      */
-    private inner class Cn(
+    class Cn(
         private val connection: R2dbcConnection,
-        private val parentInvalidationScope: TableInvalidationScope
-    ) : CnBase() {
+        private val parentInvalidationScope: TableInvalidationScope,
+        parentScopeProvider: TableInvalidationScopeProvider
+    ) : CnBase(parentScopeProvider) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
@@ -265,84 +278,85 @@ class PostgreSQLImpl(
                 } catch (e: Exception) {
                     SQLError(SQLError.Code.Database, e.message).ex()
                 }
-                Tx(connection, false)
+                Tx(connection, false, this)
+            }
+        }
+    }
+
+    /**
+     * Represents a database transaction that uses a reactive connection for transactional operations.
+     *
+     * This class implements the [Transaction] interface and provides functionality to manage the lifecycle
+     * of a transaction, including committing, rolling back, and executing SQL statements. It ensures thread-safety
+     * and consistency using a coroutine-based mutex to synchronize operations on the transaction.
+     *
+     * @constructor Creates a new transaction instance with a specific database connection.
+     * @param connection The reactive database connection used for the transaction.
+     * @param closeConnectionAfterTx Indicates whether the connection should be closed after the transaction is finalized.
+     */
+    class Tx(
+        private var connection: R2dbcConnection,
+        private val closeConnectionAfterTx: Boolean,
+        parentInvalidationScopeProvider: TableInvalidationScopeProvider,
+    ) : TxBase(parentInvalidationScopeProvider) {
+        private val mutex = Mutex()
+        private var _status: Transaction.Status = Transaction.Status.Open
+        override val status: Transaction.Status get() = _status
+
+        override suspend fun commit(): Result<Unit> = runCatching {
+            mutex.withLock {
+                assertIsOpen()
+                _status = Transaction.Status.Closed
+                try {
+                    connection.commitTransaction().awaitFirstOrNull()
+                    invalidationScope.commit()
+                } catch (e: Exception) {
+                    SQLError(SQLError.Code.Database, e.message).ex()
+                } finally {
+                    if (closeConnectionAfterTx) connection.close().awaitFirstOrNull()
+                }
             }
         }
 
-        /**
-         * Represents a database transaction that uses a reactive connection for transactional operations.
-         *
-         * This class implements the [Transaction] interface and provides functionality to manage the lifecycle
-         * of a transaction, including committing, rolling back, and executing SQL statements. It ensures thread-safety
-         * and consistency using a coroutine-based mutex to synchronize operations on the transaction.
-         *
-         * @constructor Creates a new transaction instance with a specific database connection.
-         * @param connection The reactive database connection used for the transaction.
-         * @param closeConnectionAfterTx Indicates whether the connection should be closed after the transaction is finalized.
-         */
-        inner class Tx(
-            private var connection: R2dbcConnection,
-            private val closeConnectionAfterTx: Boolean,
-        ) : TxBase() {
-            private val mutex = Mutex()
-            private var _status: Transaction.Status = Transaction.Status.Open
-            override val status: Transaction.Status get() = _status
-
-            override suspend fun commit(): Result<Unit> = runCatching {
-                mutex.withLock {
-                    assertIsOpen()
-                    _status = Transaction.Status.Closed
-                    try {
-                        connection.commitTransaction().awaitFirstOrNull()
-                        invalidationScope.commit()
-                    } catch (e: Exception) {
-                        SQLError(SQLError.Code.Database, e.message).ex()
-                    } finally {
-                        if (closeConnectionAfterTx) connection.close().awaitFirstOrNull()
-                    }
+        override suspend fun rollback(): Result<Unit> = runCatching {
+            mutex.withLock {
+                assertIsOpen()
+                _status = Transaction.Status.Closed
+                try {
+                    connection.rollbackTransaction().awaitFirstOrNull()
+                    invalidationScope.rollback()
+                } catch (e: Exception) {
+                    SQLError(SQLError.Code.Database, e.message).ex()
+                } finally {
+                    if (closeConnectionAfterTx) connection.close().awaitFirstOrNull()
                 }
             }
-
-            override suspend fun rollback(): Result<Unit> = runCatching {
-                mutex.withLock {
-                    assertIsOpen()
-                    _status = Transaction.Status.Closed
-                    try {
-                        connection.rollbackTransaction().awaitFirstOrNull()
-                        invalidationScope.rollback()
-                    } catch (e: Exception) {
-                        SQLError(SQLError.Code.Database, e.message).ex()
-                    } finally {
-                        if (closeConnectionAfterTx) connection.close().awaitFirstOrNull()
-                    }
-                }
-            }
-
-            override suspend fun execute(sql: String): Result<Long> = runCatching {
-                mutex.withLock {
-                    assertIsOpen()
-                    @Suppress("SqlSourceToSinkFlow")
-                    connection.createStatement(sql).execute().awaitSingle().rowsUpdated.awaitFirstOrNull() ?: 0
-                }
-            }
-
-            override suspend fun execute(statement: Statement): Result<Long> =
-                execute(statement.render(encoders))
-
-            override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
-                return mutex.withLock {
-                    assertIsOpen()
-                    @Suppress("SqlSourceToSinkFlow")
-                    connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult()
-                }
-            }
-
-            override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-                fetchAll(statement.render(encoders))
-
-            override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-                fetchAll(statement.render(encoders), rowMapper)
         }
+
+        override suspend fun execute(sql: String): Result<Long> = runCatching {
+            mutex.withLock {
+                assertIsOpen()
+                @Suppress("SqlSourceToSinkFlow")
+                connection.createStatement(sql).execute().awaitSingle().rowsUpdated.awaitFirstOrNull() ?: 0
+            }
+        }
+
+        override suspend fun execute(statement: Statement): Result<Long> =
+            execute(statement.render(encoders))
+
+        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+            return mutex.withLock {
+                assertIsOpen()
+                @Suppress("SqlSourceToSinkFlow")
+                connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult()
+            }
+        }
+
+        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
+            fetchAll(statement.render(encoders))
+
+        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
+            fetchAll(statement.render(encoders), rowMapper)
     }
 
     companion object {

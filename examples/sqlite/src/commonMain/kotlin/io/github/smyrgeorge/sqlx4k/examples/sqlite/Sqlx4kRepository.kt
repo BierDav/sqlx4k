@@ -4,6 +4,7 @@ import io.github.smyrgeorge.sqlx4k.CrudRepository
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.annotation.Query
 import io.github.smyrgeorge.sqlx4k.annotation.Repository
+import kotlinx.coroutines.flow.Flow
 
 @Repository(mapper = Sqlx4kRowMapper::class)
 interface Sqlx4kRepository : CrudRepository<Sqlx4k> {
@@ -15,4 +16,7 @@ interface Sqlx4kRepository : CrudRepository<Sqlx4k> {
 
     @Query("SELECT count(*) FROM sqlx4k")
     suspend fun countAll(context: QueryExecutor): Result<Long>
+
+    @Query("SELECT count(*) FROM sqlx4k")
+    fun countAllFlow(context: QueryExecutor): Flow<Result<Long>>
 }

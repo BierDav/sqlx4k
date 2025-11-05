@@ -1,6 +1,7 @@
 package io.github.smyrgeorge.sqlx4k.mysql
 
 import io.github.smyrgeorge.sqlx4k.*
+import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
 import io.github.smyrgeorge.sqlx4k.impl.extensions.*
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
@@ -73,7 +74,7 @@ class MySQL(
     override suspend fun acquire(): Result<Connection> = runCatching {
         sqlx { c -> sqlx4k_cn_acquire(rt, c, DriverNativeUtils.fn) }.use {
             it.throwIfError()
-            Cn(rt, it.cn!!)
+            Cn(rt, it.cn!!, this)
         }
     }
 
@@ -98,7 +99,7 @@ class MySQL(
     override suspend fun begin(): Result<Transaction> = runCatching {
         sqlx { c -> sqlx4k_tx_begin(rt, c, DriverNativeUtils.fn) }.use {
             it.throwIfError()
-            Tx(rt, it.tx!!)
+            Tx(rt, it.tx!!,this)
         }
     }
 
@@ -114,10 +115,11 @@ class MySQL(
      *              This pointer is required for any database operations performed through this connection.
      * @property cn A `CPointer` representing the native connection object.
      */
-    private inner class Cn(
+    class Cn(
         private val rt: CPointer<out CPointed>,
-        private val cn: CPointer<out CPointed>
-    ) : CnBase() {
+        private val cn: CPointer<out CPointed>,
+        parentScopeProvider: TableInvalidationScopeProvider
+    ) : CnBase(parentScopeProvider) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
@@ -163,74 +165,76 @@ class MySQL(
                 assertIsOpen()
                 sqlx { c -> sqlx4k_cn_tx_begin(rt, cn, c, DriverNativeUtils.fn) }.use {
                     it.throwIfError()
-                    Tx(rt, it.tx!!)
+                    Tx(rt, it.tx!!, this)
+                }
+            }
+        }
+    }
+
+    /**
+     * Implementation of the `Transaction` interface that provides methods to manage
+     * and execute transactional operations using SQL commands. Transactions are
+     * synchronized using a `Mutex` to maintain thread safety.
+     *
+     * @constructor Initializes the transaction implementation with the provided transaction pointer.
+     * @property tx The transaction pointer representing the current state and context of the transaction.
+     */
+    class Tx(
+        private val rt: CPointer<out CPointed>,
+        private var tx: CPointer<out CPointed>,
+        parentInvalidationScopeProvider: TableInvalidationScopeProvider
+    ) : TxBase(parentInvalidationScopeProvider) {
+        private val mutex = Mutex()
+        private var _status: Transaction.Status = Transaction.Status.Open
+        override val status: Transaction.Status get() = _status
+
+        override suspend fun commit(): Result<Unit> = runCatching {
+            mutex.withLock {
+                assertIsOpen()
+                _status = Transaction.Status.Closed
+                sqlx { c -> sqlx4k_tx_commit(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
+                invalidationScope.commit()
+            }
+        }
+
+        override suspend fun rollback(): Result<Unit> = runCatching {
+            mutex.withLock {
+                assertIsOpen()
+                _status = Transaction.Status.Closed
+                sqlx { c -> sqlx4k_tx_rollback(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
+                invalidationScope.rollback()
+            }
+        }
+
+        override suspend fun execute(sql: String): Result<Long> = runCatching {
+            mutex.withLock {
+                assertIsOpen()
+                sqlx { c -> sqlx4k_tx_query(rt, tx, sql, c, DriverNativeUtils.fn) }.use {
+                    tx = it.tx!!
+                    it.throwIfError()
+                    it.rows_affected.toLong()
                 }
             }
         }
 
+        override suspend fun execute(statement: Statement): Result<Long> =
+            execute(statement.render(encoders))
 
-        /**
-         * Implementation of the `Transaction` interface that provides methods to manage
-         * and execute transactional operations using SQL commands. Transactions are
-         * synchronized using a `Mutex` to maintain thread safety.
-         *
-         * @constructor Initializes the transaction implementation with the provided transaction pointer.
-         * @property tx The transaction pointer representing the current state and context of the transaction.
-         */
-        inner class Tx(
-            private val rt: CPointer<out CPointed>,
-            private var tx: CPointer<out CPointed>
-        ) : TxBase() {
-            private val mutex = Mutex()
-            private var _status: Transaction.Status = Transaction.Status.Open
-            override val status: Transaction.Status get() = _status
-
-            override suspend fun commit(): Result<Unit> = runCatching {
-                mutex.withLock {
-                    assertIsOpen()
-                    _status = Transaction.Status.Closed
-                    sqlx { c -> sqlx4k_tx_commit(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
-                }
+        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+            return mutex.withLock {
+                assertIsOpen()
+                sqlx { c -> sqlx4k_tx_fetch_all(rt, tx, sql, c, DriverNativeUtils.fn) }.use {
+                    tx = it.tx!!
+                    it.toResultSet()
+                }.toResult()
             }
-
-            override suspend fun rollback(): Result<Unit> = runCatching {
-                mutex.withLock {
-                    assertIsOpen()
-                    _status = Transaction.Status.Closed
-                    sqlx { c -> sqlx4k_tx_rollback(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
-                }
-            }
-
-            override suspend fun execute(sql: String): Result<Long> = runCatching {
-                mutex.withLock {
-                    assertIsOpen()
-                    sqlx { c -> sqlx4k_tx_query(rt, tx, sql, c, DriverNativeUtils.fn) }.use {
-                        tx = it.tx!!
-                        it.throwIfError()
-                        it.rows_affected.toLong()
-                    }
-                }
-            }
-
-            override suspend fun execute(statement: Statement): Result<Long> =
-                execute(statement.render(encoders))
-
-            override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
-                return mutex.withLock {
-                    assertIsOpen()
-                    sqlx { c -> sqlx4k_tx_fetch_all(rt, tx, sql, c, DriverNativeUtils.fn) }.use {
-                        tx = it.tx!!
-                        it.toResultSet()
-                    }.toResult()
-                }
-            }
-
-            override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-                fetchAll(statement.render(encoders))
-
-            override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-                fetchAll(statement.render(encoders), rowMapper)
         }
+
+        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
+            fetchAll(statement.render(encoders))
+
+        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
+            fetchAll(statement.render(encoders), rowMapper)
     }
 
     companion object {

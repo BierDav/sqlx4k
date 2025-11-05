@@ -14,7 +14,7 @@ class DefaultTableInvalidationScope : TableInvalidationScope {
 
     override val invalidationFlow: SharedFlow<Set<KClass<*>>> = _invalidationFlow.asSharedFlow()
 
-    override suspend fun invalidate(tables: Iterable<KClass<*>>) {
-        _invalidationFlow.emit(tables.toSet())
+    override fun invalidate(tables: Iterable<KClass<*>>) {
+        _invalidationFlow.tryEmit(tables.toSet())
     }
 }

@@ -36,7 +36,7 @@ class ConnectionPoolErrorHandlingTests {
     @Test
     fun `Connection factory error does not leak semaphore permits`() = runBlocking {
         var attempts = 0
-        val factory: suspend () -> Connection = {
+        val factory: ConnectionFactory = {
             attempts++
             if (attempts == 1) error("Simulated factory failure")
             FakeConnection(nextId++)
@@ -72,7 +72,7 @@ class ConnectionPoolErrorHandlingTests {
     @Test
     fun `Warmup failure does not corrupt pool state`() = runBlocking {
         var attempts = 0
-        val factory: suspend () -> Connection = {
+        val factory: ConnectionFactory = {
             attempts++
             if (attempts <= 2) {
                 delay(10)
@@ -120,7 +120,7 @@ class ConnectionPoolErrorHandlingTests {
     @Test
     fun `Connection factory exception during warmup does not prevent pool operation`() = runBlocking {
         var created = 0
-        val factory: suspend () -> Connection = {
+        val factory: ConnectionFactory = {
             created++
             if (created <= 1) {
                 error("First connection failed")

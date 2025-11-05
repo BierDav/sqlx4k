@@ -1,6 +1,7 @@
 package io.github.smyrgeorge.sqlx4k.sqlite
 
 import io.github.smyrgeorge.sqlx4k.*
+import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
 import io.github.smyrgeorge.sqlx4k.impl.extensions.*
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
@@ -31,7 +32,7 @@ import kotlin.time.Duration
 class SQLite(
     url: String,
     options: ConnectionPool.Options = ConnectionPool.Options(),
-) : ISQLite {
+) : ISQLite, DriverBase() {
     private val rt: CPointer<out CPointed> = sqlx4k_of(
         url = url,
         username = null,
@@ -71,7 +72,7 @@ class SQLite(
     override suspend fun acquire(): Result<Connection> = runCatching {
         sqlx { c -> sqlx4k_cn_acquire(rt, c, DriverNativeUtils.fn) }.use {
             it.throwIfError()
-            Cn(rt, it.cn!!)
+            Cn(rt, it.cn!!, this)
         }
     }
 
@@ -92,6 +93,13 @@ class SQLite(
 
     override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
         fetchAll(statement.render(encoders), rowMapper)
+
+    override suspend fun begin(): Result<Transaction> = runCatching {
+        sqlx { c -> sqlx4k_tx_begin(rt, c, DriverNativeUtils.fn) }.use {
+            it.throwIfError()
+            Tx(rt, it.tx!!, this)
+        }
+    }
 
     /**
      * Represents a native database connection that implements the `Connection` interface.
@@ -155,7 +163,7 @@ class SQLite(
                 assertIsOpen()
                 sqlx { c -> sqlx4k_cn_tx_begin(rt, cn, c, DriverNativeUtils.fn) }.use {
                     it.throwIfError()
-                    Tx(rt, it.tx!!)
+                    Tx(rt, it.tx!!, this)
                 }
             }
         }
@@ -178,8 +186,9 @@ class SQLite(
      */
     class Tx(
         private val rt: CPointer<out CPointed>,
-        private var tx: CPointer<out CPointed>
-    ) : Transaction {
+        private var tx: CPointer<out CPointed>,
+        parentInvalidationScopeProvider: TableInvalidationScopeProvider
+    ) : TxBase(parentInvalidationScopeProvider) {
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
         override val status: Transaction.Status get() = _status
@@ -189,6 +198,7 @@ class SQLite(
                 assertIsOpen()
                 _status = Transaction.Status.Closed
                 sqlx { c -> sqlx4k_tx_commit(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
+                invalidationScope.commit()
             }
         }
 
@@ -197,6 +207,7 @@ class SQLite(
                 assertIsOpen()
                 _status = Transaction.Status.Closed
                 sqlx { c -> sqlx4k_tx_rollback(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
+                invalidationScope.rollback()
             }
         }
 
