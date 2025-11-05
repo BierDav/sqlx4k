@@ -10,7 +10,7 @@ class DefaultTableInvalidationScope : TableInvalidationScope {
     /**
      * The backing [MutableSharedFlow] for our public [invalidationFlow].
      */
-    private val _invalidationFlow = MutableSharedFlow<Set<KClass<*>>>()
+    private val _invalidationFlow = MutableSharedFlow<Set<KClass<*>>>(extraBufferCapacity = 1)
 
     override val invalidationFlow: SharedFlow<Set<KClass<*>>> = _invalidationFlow.asSharedFlow()
 

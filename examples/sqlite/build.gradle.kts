@@ -3,14 +3,15 @@ import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 
 plugins {
-    id("io.github.smyrgeorge.sqlx4k.multiplatform.binaries")
+//    id("io.github.smyrgeorge.sqlx4k.multiplatform.binaries")
+    alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.ksp) // We need the KSP plugin for code-generation.
 }
 
 kotlin {
-    @Suppress("unused")
+    jvm()
     sourceSets {
-        val commonMain by getting {
+        commonMain {
             dependencies {
                 implementation(project(":sqlx4k-sqlite"))
             }
@@ -26,18 +27,18 @@ ksp {
 }
 
 dependencies {
-    add("kspCommonMainMetadata", project(":sqlx4k-codegen"))
+    ksp(project(":sqlx4k-codegen"))
 }
 
-targetsOf(project).forEach {
-    project.tasks.getByName("compileKotlin$it") {
-        dependsOn("kspCommonMainKotlinMetadata")
-    }
-}
+//targetsOf(project).forEach {
+//    project.tasks.getByName("compileKotlin$it") {
+//        dependsOn("kspCommonMainKotlinMetadata")
+//    }
+//}
 
-tasks.withType<KotlinCompilationTask<*>> {
-    dependsOn("kspCommonMainKotlinMetadata")
-}
+//tasks.withType<KotlinCompilationTask<*>> {
+//    dependsOn("kspCommonMainKotlinMetadata")
+//}
 
 fun targetsOf(project: Project): List<String> {
     val os = DefaultNativePlatform.getCurrentOperatingSystem()

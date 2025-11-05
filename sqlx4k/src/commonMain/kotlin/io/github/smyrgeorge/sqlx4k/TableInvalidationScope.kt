@@ -1,14 +1,6 @@
 package io.github.smyrgeorge.sqlx4k
 
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.*
 import kotlin.reflect.KClass
 
 interface TableInvalidationScope {
@@ -62,18 +54,17 @@ interface TableInvalidationScope {
 fun <T> QueryExecutor.listenForInvalidation(
     vararg tables: KClass<*>,
     query: suspend QueryExecutor.() -> T
-): Flow<T> = flow {
+): Flow<T> = channelFlow {
     val dependentTables = tables.toSet()
     if (dependentTables.isEmpty()) {
-        emit(query())
-        return@flow
+        send(query())
+        return@channelFlow
     }
 
     invalidationScope.invalidationFlow
         .filter { invalidatedSet ->
             invalidatedSet.any { it in dependentTables }
         }
-        .onStart { emit(query()) }
-        .conflate()
-        .collect { emit(query())  }
+        .onStart { send(query()) }
+        .collect { send(query()) }
 }

@@ -36,7 +36,7 @@ class SQLite(
     url: String,
     options: ConnectionPool.Options = ConnectionPool.Options(),
 ) : ISQLite, DriverBase() {
-    private val pool: ConnectionPoolImpl = createConnectionPool(url, options)
+    private val pool: ConnectionPoolImpl = createConnectionPool(url, options, this)
 
     override suspend fun migrate(
         path: String,
@@ -313,7 +313,8 @@ class SQLite(
 
         private fun createConnectionPool(
             url: String,
-            options: ConnectionPool.Options
+            options: ConnectionPool.Options,
+            invalidationScopeProvider: TableInvalidationScopeProvider
         ): ConnectionPoolImpl {
             // Ensure the URL has the proper JDBC prefix
             val jdbcUrl = "jdbc:sqlite:${url.removePrefix("jdbc:").removePrefix("sqlite:").removePrefix("//")}"
@@ -343,7 +344,7 @@ class SQLite(
                     }
                 }
             }
-            return ConnectionPoolImpl(options, null, connectionFactory)
+            return ConnectionPoolImpl(options, null,connectionFactory,invalidationScopeProvider)
         }
     }
 }

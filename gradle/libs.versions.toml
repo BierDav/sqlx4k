@@ -4,11 +4,11 @@ kotlin = "2.2.21"
 # https://github.com/Kotlin/kotlinx-io
 kotlinx-io = "0.8.0"
 # https://github.com/Kotlin/kotlinx-datetime
-kotlinx-datetime = "0.7.1-0.6.x-compat"
+kotlinx-datetime = "0.7.1"
 # https://github.com/Kotlin/kotlinx.coroutines
 kotlinx-coroutines = "1.10.2"
 # https://github.com/Kotlin/kotlinx.serialization
-kotlinx-serialisation = "1.9.0"
+kotlinx-serialization = "1.9.0"
 # https://github.com/vanniktech/gradle-maven-publish-plugin
 publish = "0.34.0"
 # https://github.com/Kotlin/dokka
@@ -16,7 +16,7 @@ dokka = "2.1.0"
 # https://github.com/willowtreeapps/assertk
 assertk = "0.28.1"
 # https://github.com/google/ksp/releases
-ksp = "2.3.0"
+ksp = "2.3.1"
 # https://plugins.gradle.org/plugin/org.springframework.boot
 spring-boot = "3.5.7"
 # https://plugins.gradle.org/plugin/io.spring.dependency-management
@@ -49,7 +49,7 @@ kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.re
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-reactive = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-reactive", version.ref = "kotlinx-coroutines" }
-kotlinx-serialisation-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialisation" }
+kotlinx-serialisation-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 assertk = { module = "com.willowtreeapps.assertk:assertk", version.ref = "assertk" }
 r2dbc-pool = { module = "io.r2dbc:r2dbc-pool", version.ref = "r2dbc-pool" }
 r2dbc-mysql = { module = "io.asyncer:r2dbc-mysql", version.ref = "r2dbc-mysql" }

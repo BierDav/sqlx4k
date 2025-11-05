@@ -15,10 +15,10 @@ class TransactionTableInvalidationScope(val parentProvider: TableInvalidationSco
         invalidatedTables.addAll(tables)
     }
 
-    suspend fun commit() {
+    fun commit() {
         parentProvider.invalidationScope.invalidate(invalidatedTables)
         invalidatedTables.clear()
     }
 
-    suspend fun rollback() = invalidatedTables.clear()
+    fun rollback() = invalidatedTables.clear()
 }

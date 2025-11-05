@@ -31,11 +31,11 @@ dependencies {
     // add("kspMacosArm64", project(":sqlx4k-codegen"))
 }
 
-targetsOf(project).forEach {
-    project.tasks.getByName("compileKotlin$it") {
-        dependsOn("kspCommonMainKotlinMetadata")
-    }
-}
+//targetsOf(project).forEach {
+//    project.tasks.getByName("compileKotlin$it") {
+//        dependsOn("kspCommonMainKotlinMetadata")
+//    }
+//}
 
 tasks.withType<KotlinCompilationTask<*>> {
     dependsOn("kspCommonMainKotlinMetadata")

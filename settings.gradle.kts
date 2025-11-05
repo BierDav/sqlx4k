@@ -21,5 +21,5 @@ include("examples:mysql")
 include("examples:postgres")
 include("examples:sqlite")
 
-include("bench:postgres-sqlx4k")
-include("bench:postgres-spring-boot-r2dbc")
+//include("bench:postgres-sqlx4k")
+//include("bench:postgres-spring-boot-r2dbc")

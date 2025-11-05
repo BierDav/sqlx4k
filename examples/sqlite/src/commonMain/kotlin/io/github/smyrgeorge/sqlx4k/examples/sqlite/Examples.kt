@@ -4,14 +4,16 @@ import io.github.smyrgeorge.sqlx4k.Connection
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.Statement
 import io.github.smyrgeorge.sqlx4k.impl.coroutines.TransactionContext
+import io.github.smyrgeorge.sqlx4k.impl.invalidation.DefaultTableInvalidationScope
+import io.github.smyrgeorge.sqlx4k.listenForInvalidation
 import io.github.smyrgeorge.sqlx4k.sqlite.ISQLite
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlin.reflect.KClass
 
 object Examples {
     suspend fun runAll(db: ISQLite, repo: Sqlx4kRepository) {
+        exampleFlow(db, repo)
         delay(2000)
         migrate(db)
         delay(1000)
@@ -217,21 +219,28 @@ object Examples {
 
     @OptIn(DelicateCoroutinesApi::class)
     suspend fun exampleFlow(db: ISQLite, repo: Sqlx4kRepository) {
+        println("\n=== Flow subscription ===")
+
         val flowJob = GlobalScope.launch {
             repo.countAllFlow(db).collect {
-                println("Current rows counted: $it")
+                println("Current rows counted: ${it.getOrNull()}")
             }
         }
-        val entity = Sqlx4k(67, "tc")
-        TransactionContext.new(db) {
-            repo.insert(this, entity)
-            println("Inserted id=${entity.id} in TransactionContext")
+        val workerJob = GlobalScope.launch {
+            delay(500)
+            val entity = Sqlx4k(67, "tc")
+            TransactionContext.new(db) {
+                repo.insert(db, entity)
+                println("Inserted id=${entity.id} in TransactionContext")
+            }
+            delay(500)
+            TransactionContext.new(db) {
+                repo.delete(this, entity)
+                println("Deleted id=${entity.id} in TransactionContext")
+            }
+            delay(500)
+            flowJob.cancel()
         }
-        TransactionContext.new(db) {
-            repo.delete(this, entity)
-            println("Deleted id=${entity.id} in TransactionContext")
-        }
-        delay(500)
-        flowJob.cancel()
+        joinAll(flowJob, workerJob)
     }
 }
