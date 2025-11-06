@@ -65,6 +65,9 @@ class RepositoryProcessor(
         file += "import ${TypeNames.STATEMENT}\n"
         file += "import ${TypeNames.QUERY_EXECUTOR}\n"
         file += "import ${TypeNames.LISTEN_FOR_INVALIDATION}\n"
+        file += "import ${TypeNames.CRUD_REPOSITORY}\n"
+        file += "import ${TypeNames.HOOK_API}\n"
+        file += "import ${TypeNames.MUTABLE_HOOK_EVENT_BUS}\n"
 
         // For each repository interface, find methods annotated with @Query
         val validatedRepos = repoSymbols.filter { it.validate() }
@@ -747,13 +750,15 @@ class RepositoryProcessor(
         } else {
             file += "    override suspend fun insert(context: QueryExecutor, entity: $domainQn) = run {\n"
         }
-        file += """        val statement = entity.insert()
+        file += """        val hook = if (context is HookApi) context.hook as MutableHookEventBus else null
+                           hook?.publish { CrudRepository.BeforeInsertHook(entity, listOf($dependentTablesArg), context) }
+                           val statement = entity.insert()
                            val result = context.fetchAll(statement, $mapperTypeName).map { list ->
                                val one = list.firstOrNull()
                                    ?: return@run Result.failure(IllegalStateException("Insert query returned no rows"))
                                one
                            }
-                           context.invalidationScope.invalidate($dependentTablesArg)
+                           hook?.publish { CrudRepository.AfterInsertHook(entity, listOf($dependentTablesArg), result, context) }
                            result
                        }
                    """.trimIndent()
@@ -779,13 +784,15 @@ class RepositoryProcessor(
         } else {
             file += "    override suspend fun update(context: QueryExecutor, entity: $domainQn) = run {\n"
         }
-        file += """        val statement = entity.update()
+        file += """        val hook = if (context is HookApi) context.hook as MutableHookEventBus else null
+                           hook?.publish { CrudRepository.BeforeUpdateHook(entity, listOf($dependentTablesArg), context) }
+                           val statement = entity.update()
                            val result = context.fetchAll(statement, $mapperTypeName).map { list ->
                                val one = list.firstOrNull()
                                    ?: return@run Result.failure(IllegalStateException("Update query returned no rows"))
                                one
                            }
-                           context.invalidationScope.invalidate($dependentTablesArg)
+                           hook?.publish { CrudRepository.AfterUpdateHook(entity, listOf($dependentTablesArg), result, context) }
                            result
                        }
                    """
@@ -810,9 +817,11 @@ class RepositoryProcessor(
         } else {
             file += "    override suspend fun delete(context: QueryExecutor, entity: $domainQn) = run {\n"
         }
-        file += """        val statement = entity.delete()
+        file += """        val hook = if (context is HookApi) context.hook as MutableHookEventBus else null
+                           hook?.publish { CrudRepository.BeforeDeleteHook(entity, listOf($dependentTablesArg), context) }
+                           val statement = entity.delete()
                            val result = context.execute(statement).map { kotlin.Unit }
-                           context.invalidationScope.invalidate($dependentTablesArg)
+                           hook?.publish { CrudRepository.AfterDeleteHook(entity, listOf($dependentTablesArg), result, context) }
                            result
                        }
                    """

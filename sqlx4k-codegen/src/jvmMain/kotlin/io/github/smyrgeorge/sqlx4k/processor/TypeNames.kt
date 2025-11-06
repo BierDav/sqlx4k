@@ -22,7 +22,9 @@ object TypeNames {
     const val CRUD_REPOSITORY = "io.github.smyrgeorge.sqlx4k.CrudRepository"
     const val CONTEXT_CRUD_REPOSITORY = "io.github.smyrgeorge.sqlx4k.ContextCrudRepository"
     const val QUERY_EXECUTOR = "io.github.smyrgeorge.sqlx4k.QueryExecutor"
-    const val LISTEN_FOR_INVALIDATION = "io.github.smyrgeorge.sqlx4k.listenForInvalidation"
+    const val LISTEN_FOR_INVALIDATION = "io.github.smyrgeorge.sqlx4k.invalidation.listenForInvalidation"
+    const val HOOK_API = "io.github.smyrgeorge.sqlx4k.impl.hook.HookApi"
+    const val MUTABLE_HOOK_EVENT_BUS = "io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus"
     const val STATEMENT = "io.github.smyrgeorge.sqlx4k.Statement"
 
     // Kotlin stdlib

@@ -1,6 +1,5 @@
-package io.github.smyrgeorge.sqlx4k.impl.invalidation
+package io.github.smyrgeorge.sqlx4k.invalidation
 
-import io.github.smyrgeorge.sqlx4k.CrudRepository
 import io.github.smyrgeorge.sqlx4k.Driver
 import io.github.smyrgeorge.sqlx4k.Hooks
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
@@ -8,6 +7,7 @@ import io.github.smyrgeorge.sqlx4k.Transaction
 import io.github.smyrgeorge.sqlx4k.impl.hook.MutableEventBus
 import io.github.smyrgeorge.sqlx4k.impl.hook.subscribeAsync
 import io.github.smyrgeorge.sqlx4k.impl.metadata.MetadataStorage
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlin.reflect.KClass
@@ -41,7 +41,8 @@ private fun MetadataStorage.requireInvalidationScope() = get<InvalidationScope>(
  *
  * @see MutableEventBus.enableGlobally
  */
-suspend fun Driver.applyInvalidationHandler() = coroutineScope {
+context(scope: CoroutineScope)
+fun Driver.applyInvalidationHandler()  {
     MutableEventBus.enableGlobally = true
 
     val scope = InvalidationScope()

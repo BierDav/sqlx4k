@@ -7,6 +7,10 @@ plugins {
 kotlin {
     @Suppress("unused")
     sourceSets {
+        all {
+            languageSettings.enableLanguageFeature("NestedTypeAliases")
+            languageSettings.enableLanguageFeature("ContextParameters")
+        }
         configureEach {
             languageSettings.progressiveMode = true
         }
