@@ -3,6 +3,7 @@ package io.github.smyrgeorge.sqlx4k.mysql
 import io.github.smyrgeorge.sqlx4k.*
 import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
 import io.github.smyrgeorge.sqlx4k.impl.extensions.*
+import io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
 import kotlinx.cinterop.CPointed
@@ -64,28 +65,28 @@ class MySQL(
         afterFileMigration = afterFileMigration
     )
 
-    override suspend fun close(): Result<Unit> = runCatching {
+    override suspend fun internalClose(): Result<Unit> = runCatching {
         sqlx { c -> sqlx4k_close(rt, c, DriverNativeUtils.fn) }.throwIfError()
     }
 
     override fun poolSize(): Int = sqlx4k_pool_size(rt)
     override fun poolIdleSize(): Int = sqlx4k_pool_idle_size(rt)
 
-    override suspend fun acquire(): Result<Connection> = runCatching {
+    override suspend fun internalAcquire(): Result<Connection> = runCatching {
         sqlx { c -> sqlx4k_cn_acquire(rt, c, DriverNativeUtils.fn) }.use {
             it.throwIfError()
-            Cn(rt, it.cn!!, this)
+            Cn(rt, it.cn!!, hook)
         }
     }
 
-    override suspend fun execute(sql: String): Result<Long> = runCatching {
+    override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
         sqlx { c -> sqlx4k_query(rt, sql, c, DriverNativeUtils.fn) }.rowsAffectedOrError()
     }
 
     override suspend fun execute(statement: Statement): Result<Long> =
         execute(statement.render(encoders))
 
-    override suspend fun fetchAll(sql: String): Result<ResultSet> {
+    override suspend fun internalFetchAll(sql: String): Result<ResultSet> {
         val res = sqlx { c -> sqlx4k_fetch_all(rt, sql, c, DriverNativeUtils.fn) }
         return res.use { it.toResultSet() }.toResult()
     }
@@ -93,13 +94,10 @@ class MySQL(
     override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
         fetchAll(statement.render(encoders))
 
-    override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-        fetchAll(statement.render(encoders), rowMapper)
-
-    override suspend fun begin(): Result<Transaction> = runCatching {
+    override suspend fun internalBegin(): Result<Transaction> = runCatching {
         sqlx { c -> sqlx4k_tx_begin(rt, c, DriverNativeUtils.fn) }.use {
             it.throwIfError()
-            Tx(rt, it.tx!!,this)
+            Tx(rt, it.tx!!,hook)
         }
     }
 
@@ -118,13 +116,13 @@ class MySQL(
     class Cn(
         private val rt: CPointer<out CPointed>,
         private val cn: CPointer<out CPointed>,
-        parentScopeProvider: TableInvalidationScopeProvider
-    ) : CnBase(parentScopeProvider) {
+        parentHook: MutableHookEventBus,
+    ) : CnBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
 
-        override suspend fun close(): Result<Unit> = runCatching {
+        override suspend fun internalClose(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Connection.Status.Closed
@@ -132,7 +130,7 @@ class MySQL(
             }
         }
 
-        override suspend fun execute(sql: String): Result<Long> = runCatching {
+        override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 sqlx { c -> sqlx4k_cn_query(rt, cn, sql, c, DriverNativeUtils.fn) }.use {
@@ -145,7 +143,7 @@ class MySQL(
         override suspend fun execute(statement: Statement): Result<Long> =
             execute(statement.render(encoders))
 
-        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+        override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
                 sqlx { c -> sqlx4k_cn_fetch_all(rt, cn, sql, c, DriverNativeUtils.fn) }
@@ -157,15 +155,13 @@ class MySQL(
         override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
             fetchAll(statement.render(encoders))
 
-        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-            fetchAll(statement.render(encoders), rowMapper)
 
-        override suspend fun begin(): Result<Transaction> = runCatching {
+        override suspend fun internalBegin(): Result<Transaction> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 sqlx { c -> sqlx4k_cn_tx_begin(rt, cn, c, DriverNativeUtils.fn) }.use {
                     it.throwIfError()
-                    Tx(rt, it.tx!!, this)
+                    Tx(rt, it.tx!!, hook)
                 }
             }
         }
@@ -182,31 +178,29 @@ class MySQL(
     class Tx(
         private val rt: CPointer<out CPointed>,
         private var tx: CPointer<out CPointed>,
-        parentInvalidationScopeProvider: TableInvalidationScopeProvider
-    ) : TxBase(parentInvalidationScopeProvider) {
+        parentHook: MutableHookEventBus,
+    ) : TxBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
         override val status: Transaction.Status get() = _status
 
-        override suspend fun commit(): Result<Unit> = runCatching {
+        override suspend fun internalCommit(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Transaction.Status.Closed
                 sqlx { c -> sqlx4k_tx_commit(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
-                invalidationScope.commit()
             }
         }
 
-        override suspend fun rollback(): Result<Unit> = runCatching {
+        override suspend fun internalRollback(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Transaction.Status.Closed
                 sqlx { c -> sqlx4k_tx_rollback(rt, tx, c, DriverNativeUtils.fn) }.throwIfError()
-                invalidationScope.rollback()
             }
         }
 
-        override suspend fun execute(sql: String): Result<Long> = runCatching {
+        override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 sqlx { c -> sqlx4k_tx_query(rt, tx, sql, c, DriverNativeUtils.fn) }.use {
@@ -220,7 +214,7 @@ class MySQL(
         override suspend fun execute(statement: Statement): Result<Long> =
             execute(statement.render(encoders))
 
-        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+        override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
                 sqlx { c -> sqlx4k_tx_fetch_all(rt, tx, sql, c, DriverNativeUtils.fn) }.use {
@@ -232,9 +226,6 @@ class MySQL(
 
         override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
             fetchAll(statement.render(encoders))
-
-        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-            fetchAll(statement.render(encoders), rowMapper)
     }
 
     companion object {
