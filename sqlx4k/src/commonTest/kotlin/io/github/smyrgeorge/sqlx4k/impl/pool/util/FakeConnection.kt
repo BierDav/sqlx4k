@@ -39,9 +39,4 @@ class FakeConnection(val id: Long) : Connection {
 
     override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
         Result.success(ResultSet(emptyList(), null, ResultSet.Metadata(emptyList())))
-
-    override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-        Result.success(emptyList())
-
-
 }

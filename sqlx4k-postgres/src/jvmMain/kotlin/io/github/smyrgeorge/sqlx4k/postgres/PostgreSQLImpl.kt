@@ -99,9 +99,6 @@ class PostgreSQLImpl(
     override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
         fetchAll(statement.render(encoders))
 
-    override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-        fetchAll(statement.render(encoders), rowMapper)
-
     override suspend fun begin(): Result<Transaction> = runCatching {
         with(pool.acquire()) {
             try {
@@ -229,7 +226,7 @@ class PostgreSQLImpl(
         private val connection: R2dbcConnection,
         private val parentInvalidationScope: TableInvalidationScope,
         parentScopeProvider: TableInvalidationScopeProvider
-    ) : CnBase(parentScopeProvider) {
+    ) : CnBase(parentScopeProvider, TODO()) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
@@ -267,9 +264,6 @@ class PostgreSQLImpl(
         override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
             fetchAll(statement.render(encoders))
 
-        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-            fetchAll(statement.render(encoders), rowMapper)
-
         override suspend fun begin(): Result<Transaction> = runCatching {
             mutex.withLock {
                 assertIsOpen()
@@ -298,7 +292,7 @@ class PostgreSQLImpl(
         private var connection: R2dbcConnection,
         private val closeConnectionAfterTx: Boolean,
         parentInvalidationScopeProvider: TableInvalidationScopeProvider,
-    ) : TxBase(parentInvalidationScopeProvider) {
+    ) : TxBase(parentInvalidationScopeProvider, TODO(), TODO()) {
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
         override val status: Transaction.Status get() = _status
@@ -355,8 +349,6 @@ class PostgreSQLImpl(
         override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
             fetchAll(statement.render(encoders))
 
-        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-            fetchAll(statement.render(encoders), rowMapper)
     }
 
     companion object {

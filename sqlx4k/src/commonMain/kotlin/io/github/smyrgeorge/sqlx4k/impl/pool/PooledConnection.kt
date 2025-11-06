@@ -3,6 +3,8 @@
 package io.github.smyrgeorge.sqlx4k.impl.pool
 
 import io.github.smyrgeorge.sqlx4k.*
+import io.github.smyrgeorge.sqlx4k.impl.hook.HookEventBus
+import io.github.smyrgeorge.sqlx4k.impl.metadata.MetadataStorage
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
@@ -14,7 +16,7 @@ import kotlin.time.TimeSource
 class PooledConnection(
     private val connection: Connection,
     private val pool: ConnectionPoolImpl,
-) : Connection, TableInvalidationScopeProvider by pool {
+) : Connection {
     private val mutex = Mutex()
     private var acquired = true
     private val released get() = !acquired
@@ -105,6 +107,9 @@ class PooledConnection(
         }
     }
 
+    override val metadata: MetadataStorage
+        get() = connection.metadata
+
     override suspend fun execute(sql: String): Result<Long> = runCatching {
         mutex.withLock {
             assertIsOpen()
@@ -125,15 +130,15 @@ class PooledConnection(
     override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
         fetchAll(statement.render(connection.encoders()))
 
-    override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-        fetchAll(statement.render(connection.encoders()), rowMapper)
-
     override suspend fun begin(): Result<Transaction> = runCatching {
         mutex.withLock {
             assertIsOpen()
             return connection.begin()
         }
     }
+
+    override val hook: HookEventBus
+        get() = connection.hook
 
     companion object {
         private val TIME_SOURCE = TimeSource.Monotonic

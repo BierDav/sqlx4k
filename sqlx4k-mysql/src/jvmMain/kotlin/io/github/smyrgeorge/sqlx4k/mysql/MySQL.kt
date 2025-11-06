@@ -10,7 +10,7 @@ import io.asyncer.r2dbc.mysql.codec.CodecRegistry
 import io.asyncer.r2dbc.mysql.extension.CodecRegistrar
 import io.github.smyrgeorge.sqlx4k.*
 import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
-import io.github.smyrgeorge.sqlx4k.impl.invalidation.DefaultTableInvalidationScope
+import io.github.smyrgeorge.sqlx4k.impl.hook.*
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
 import io.netty.buffer.ByteBuf
@@ -56,7 +56,6 @@ class MySQL(
     password: String,
     options: ConnectionPool.Options = ConnectionPool.Options(),
 ) : IMySQL, DriverBase() {
-    override val invalidationScope = DefaultTableInvalidationScope()
     private val connectionFactory: MySqlConnectionFactory = connectionFactory(url, username, password)
     private val poolConfiguration: ConnectionPoolConfiguration = connectionOptions(options, connectionFactory)
     private val pool: R2dbcConnectionPool = R2dbcConnectionPool(poolConfiguration).apply {
@@ -81,22 +80,22 @@ class MySQL(
         afterFileMigration = afterFileMigration
     )
 
-    override suspend fun close(): Result<Unit> = runCatching {
-        try {
-            pool.disposeLater().awaitFirstOrNull()
-        } catch (e: Exception) {
-            SQLError(SQLError.Code.WorkerCrashed, e.message).ex()
+    override suspend fun internalClose(): Result<Unit> = runCatching {
+            try {
+                pool.disposeLater().awaitFirstOrNull()
+            } catch (e: Exception) {
+                SQLError(SQLError.Code.WorkerCrashed, e.message).ex()
+            }
         }
-    }
 
     override fun poolSize(): Int = pool.metrics.getOrElse { error("No metrics available.") }.allocatedSize()
     override fun poolIdleSize(): Int = pool.metrics.getOrElse { error("No metrics available.") }.idleSize()
 
-    override suspend fun acquire(): Result<Connection> = runCatching {
-        Cn(pool.acquire(), this@MySQL)
+    override suspend fun internalAcquire(): Result<Connection> = runCatching {
+        Cn(pool.acquire(), hook)
     }
 
-    override suspend fun execute(sql: String) = runCatching {
+    override suspend fun internalExecute(sql: String) = runCatching {
         @Suppress("SqlSourceToSinkFlow")
         with(pool.acquire()) {
             val res = try {
@@ -113,7 +112,7 @@ class MySQL(
     override suspend fun execute(statement: Statement): Result<Long> =
         execute(statement.render(encoders))
 
-    override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+    override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
         @Suppress("SqlSourceToSinkFlow")
         with(pool.acquire()) {
             val res = try {
@@ -130,10 +129,7 @@ class MySQL(
     override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
         fetchAll(statement.render(encoders))
 
-    override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-        fetchAll(statement.render(encoders), rowMapper)
-
-    override suspend fun begin(): Result<Transaction> = runCatching {
+    override suspend fun internalBegin(): Result<Transaction> = runCatching {
         with(pool.acquire()) {
             try {
                 beginTransaction().awaitFirstOrNull()
@@ -141,7 +137,7 @@ class MySQL(
                 close().awaitFirstOrNull()
                 SQLError(SQLError.Code.Database, e.message).ex()
             }
-            Tx(this, true, this@MySQL)
+            Tx(this, true, hook)
         }
     }
 
@@ -171,14 +167,14 @@ class MySQL(
      */
     class Cn(
         private val connection: R2dbcConnection,
-        parentScopeProvider: TableInvalidationScopeProvider,
-    ) : CnBase(parentScopeProvider) {
+        parentEventBus: MutableHookEventBus,
+    ) : CnBase(parentEventBus) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
 
 
-        override suspend fun close(): Result<Unit> = runCatching {
+        override suspend fun internalClose(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Connection.Status.Closed
@@ -186,32 +182,29 @@ class MySQL(
             }
         }
 
-        override suspend fun execute(sql: String): Result<Long> = runCatching {
-            mutex.withLock {
-                assertIsOpen()
-                @Suppress("SqlSourceToSinkFlow")
-                connection.createStatement(sql).execute().awaitSingle().rowsUpdated.awaitFirstOrNull() ?: 0
+        override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
+                mutex.withLock {
+                    assertIsOpen()
+                    @Suppress("SqlSourceToSinkFlow")
+                    connection.createStatement(sql).execute().awaitSingle().rowsUpdated.awaitFirstOrNull() ?: 0
+                }
             }
-        }
 
         override suspend fun execute(statement: Statement): Result<Long> =
             execute(statement.render(encoders))
 
-        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
-            return mutex.withLock {
-                assertIsOpen()
-                @Suppress("SqlSourceToSinkFlow")
-                connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult()
+        override suspend fun internalFetchAll(sql: String): Result<ResultSet>  = runCatching {
+                mutex.withLock {
+                    assertIsOpen()
+                    @Suppress("SqlSourceToSinkFlow")
+                    connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult().getOrThrow()
+                }
             }
-        }
 
         override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
             fetchAll(statement.render(encoders))
 
-        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-            fetchAll(statement.render(encoders), rowMapper)
-
-        override suspend fun begin(): Result<Transaction> = runCatching {
+        override suspend fun internalBegin(): Result<Transaction> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 try {
@@ -219,7 +212,7 @@ class MySQL(
                 } catch (e: Exception) {
                     SQLError(SQLError.Code.Database, e.message).ex()
                 }
-                Tx(connection, false, this@Cn)
+                Tx(connection, false, hook)
             }
         }
     }
@@ -238,20 +231,19 @@ class MySQL(
     class Tx(
         private var connection: R2dbcConnection,
         private val closeConnectionAfterTx: Boolean,
-        parentInvalidationScopeProvider: TableInvalidationScopeProvider,
-    ) : TxBase(parentInvalidationScopeProvider) {
+        parentHook: MutableHookEventBus,
+    ) : TxBase(parentHook) {
 
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
         override val status: Transaction.Status get() = _status
 
-        override suspend fun commit(): Result<Unit> = runCatching {
+        override suspend fun internalCommit(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Transaction.Status.Closed
                 try {
                     connection.commitTransaction().awaitFirstOrNull()
-                    invalidationScope.commit()
                 } catch (e: Exception) {
                     SQLError(SQLError.Code.Database, e.message).ex()
                 } finally {
@@ -260,13 +252,12 @@ class MySQL(
             }
         }
 
-        override suspend fun rollback(): Result<Unit> = runCatching {
+        override suspend fun internalRollback(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Transaction.Status.Closed
                 try {
                     connection.rollbackTransaction().awaitFirstOrNull()
-                    invalidationScope.rollback()
                 } catch (e: Exception) {
                     SQLError(SQLError.Code.Database, e.message).ex()
                 } finally {
@@ -275,7 +266,7 @@ class MySQL(
             }
         }
 
-        override suspend fun execute(sql: String): Result<Long> = runCatching {
+        override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 @Suppress("SqlSourceToSinkFlow")
@@ -286,19 +277,16 @@ class MySQL(
         override suspend fun execute(statement: Statement): Result<Long> =
             execute(statement.render(encoders))
 
-        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
-            return mutex.withLock {
+        override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
+            mutex.withLock {
                 assertIsOpen()
                 @Suppress("SqlSourceToSinkFlow")
-                connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult()
+                connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult().getOrThrow()
             }
         }
 
         override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
             fetchAll(statement.render(encoders))
-
-        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-            fetchAll(statement.render(encoders), rowMapper)
     }
 
     companion object {

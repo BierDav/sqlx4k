@@ -5,7 +5,7 @@ package io.github.smyrgeorge.sqlx4k.impl.pool
 import io.github.smyrgeorge.sqlx4k.Connection
 import io.github.smyrgeorge.sqlx4k.ConnectionPool
 import io.github.smyrgeorge.sqlx4k.SQLError
-import io.github.smyrgeorge.sqlx4k.TableInvalidationScopeProvider
+import io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus
 import io.github.smyrgeorge.sqlx4k.impl.logging.Logger
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
@@ -36,8 +36,7 @@ class ConnectionPoolImpl(
     val options: ConnectionPool.Options,
     private val log: Logger? = null,
     private val connectionFactory: ConnectionFactory,
-    invalidationScopeProvider: TableInvalidationScopeProvider,
-) : ConnectionPool, TableInvalidationScopeProvider by invalidationScopeProvider {
+) : ConnectionPool {
 
     internal var closed = AtomicBoolean(false)
     internal val idleCount = AtomicInt(0)
@@ -120,7 +119,7 @@ class ConnectionPoolImpl(
             if (semaphore.tryAcquire()) {
                 try {
                     val newConnection = connectionFactory()
-                    val pooled = PooledConnection(newConnection, this)
+                    val pooled = PooledConnection(newConnection,this)
                     totalConnections.incrementAndFetch()
                     return pooled.acquire()
                 } catch (e: Exception) {

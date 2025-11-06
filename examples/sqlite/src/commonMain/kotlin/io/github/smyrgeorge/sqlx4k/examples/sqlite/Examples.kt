@@ -4,15 +4,14 @@ import io.github.smyrgeorge.sqlx4k.Connection
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.Statement
 import io.github.smyrgeorge.sqlx4k.impl.coroutines.TransactionContext
-import io.github.smyrgeorge.sqlx4k.impl.invalidation.DefaultTableInvalidationScope
-import io.github.smyrgeorge.sqlx4k.listenForInvalidation
+import io.github.smyrgeorge.sqlx4k.impl.invalidation.applyInvalidationHandler
 import io.github.smyrgeorge.sqlx4k.sqlite.ISQLite
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlin.reflect.KClass
 
 object Examples {
     suspend fun runAll(db: ISQLite, repo: Sqlx4kRepository) {
+        db.applyInvalidationHandler()
+
         exampleFlow(db, repo)
         delay(2000)
         migrate(db)

@@ -9,7 +9,7 @@ import kotlin.time.Duration
  * enabling efficient reuse and minimizing the overhead of establishing new connections. It provides
  * methods for acquiring and releasing connections, managing pool size, and configuring the pool behavior.
  */
-interface ConnectionPool : TableInvalidationScopeProvider {
+interface ConnectionPool {
     /**
      * Retrieves the current size of the connection pool.
      *

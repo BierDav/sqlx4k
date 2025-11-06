@@ -1,5 +1,9 @@
 package io.github.smyrgeorge.sqlx4k
 
+import io.github.smyrgeorge.sqlx4k.impl.hook.AfterHookEvent
+import io.github.smyrgeorge.sqlx4k.impl.hook.HookApi
+import io.github.smyrgeorge.sqlx4k.impl.hook.HookEvent
+
 /**
  * Represents a database connection capable of executing queries and managing transactions.
  *
@@ -8,7 +12,8 @@ package io.github.smyrgeorge.sqlx4k
  * This includes functionality for executing queries, transactional operations, and
  * managing the connection's open/closed state.
  */
-interface Connection : QueryExecutor, QueryExecutor.Transactional {
+interface Connection : QueryExecutor, QueryExecutor.Transactional, HookApi {
+
     val status: Status
 
     /**
@@ -61,4 +66,43 @@ interface Connection : QueryExecutor, QueryExecutor.Transactional {
         Open,
         Closed,
     }
+
+    // Close connection
+    class BeforeCloseHook(override val source: Connection) : HookEvent<Connection>
+    class AfterCloseHook(
+        override val source: Connection,
+        override val result: Result<Unit>
+    ) : AfterHookEvent<Connection, Unit>
+
+
+    // Statement
+    interface BeforeStatementHook : Hooks.BeforeStatement<Connection>
+    interface AfterStatementHook<T : Any> : Hooks.AfterStatement<Connection, T>
+
+    // Execute
+    class BeforeExecuteHook(override val source: Connection, override val sql: String) :
+        Hooks.BeforeExecute<Connection>, BeforeStatementHook
+
+    class AfterExecuteHook(
+        override val source: Connection,
+        override val statement: String,
+        override val result: Result<Long>
+    ) : Hooks.AfterExecute<Connection>, AfterStatementHook<Long>
+
+    // FetchAll
+    class BeforeFetchAllHook(override val source: Connection, override val sql: String) :
+        Hooks.BeforeFetchAll<Connection>, BeforeStatementHook
+
+    class AfterFetchAllHook(
+        override val source: Connection,
+        override val statement: String,
+        override val result: Result<ResultSet>
+    ) : Hooks.AfterFetchAll<Connection>, AfterStatementHook<ResultSet>
+
+    // Begin transaction
+    class BeforeBeginHook(override val source: Connection) : Hooks.BeforeBeginTransaction<Connection>
+    class AfterBeginHook(
+        override val source: Connection,
+        override val result: Result<Transaction>,
+    ) : Hooks.AfterBeginTransaction<Connection>
 }

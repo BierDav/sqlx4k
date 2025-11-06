@@ -2,6 +2,7 @@ package io.github.smyrgeorge.sqlx4k.sqlite
 
 import io.github.smyrgeorge.sqlx4k.*
 import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
+import io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
 import io.github.smyrgeorge.sqlx4k.impl.pool.ConnectionPoolImpl
@@ -36,7 +37,7 @@ class SQLite(
     url: String,
     options: ConnectionPool.Options = ConnectionPool.Options(),
 ) : ISQLite, DriverBase() {
-    private val pool: ConnectionPoolImpl = createConnectionPool(url, options, this)
+    private val pool: ConnectionPoolImpl = createConnectionPool(url, options, hook)
 
     override suspend fun migrate(
         path: String,
@@ -56,14 +57,14 @@ class SQLite(
         afterFileMigration = afterFileMigration
     )
 
-    override suspend fun close(): Result<Unit> = pool.close()
+    override suspend fun internalClose(): Result<Unit> = pool.close()
 
     override fun poolSize(): Int = pool.poolSize()
     override fun poolIdleSize(): Int = pool.poolIdleSize()
 
-    override suspend fun acquire(): Result<Connection> = pool.acquire()
+    override suspend fun internalAcquire(): Result<Connection> = pool.acquire()
 
-    override suspend fun execute(sql: String): Result<Long> = runCatching {
+    override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
         val connection = pool.acquire().getOrThrow()
         try {
             connection.execute(sql).getOrThrow()
@@ -77,10 +78,10 @@ class SQLite(
     override suspend fun execute(statement: Statement): Result<Long> =
         execute(statement.render(encoders))
 
-    override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+    override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
         val connection = pool.acquire().getOrThrow()
         try {
-            connection.fetchAll(sql).getOrThrow()
+            connection.fetchAll(sql).getOrThrow<ResultSet>()
         } catch (e: Exception) {
             SQLError(SQLError.Code.Database, e.message).ex()
         } finally {
@@ -91,10 +92,7 @@ class SQLite(
     override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
         fetchAll(statement.render(encoders))
 
-    override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-        fetchAll(statement.render(encoders), rowMapper)
-
-    override suspend fun begin(): Result<Transaction> = runCatching {
+    override suspend fun internalBegin(): Result<Transaction> = runCatching {
         val connection = pool.acquire().getOrThrow() as PooledConnection
         try {
             val tx = connection.begin().getOrThrow()
@@ -120,13 +118,13 @@ class SQLite(
      */
     class Cn(
         private val connection: JdbcConnection,
-        parentInvalidationScopeProvider: TableInvalidationScopeProvider
-    ) : CnBase(parentInvalidationScopeProvider) {
+        parentHook: MutableHookEventBus,
+    ) : CnBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
 
-        override suspend fun close(): Result<Unit> = runCatching {
+        override suspend fun internalClose(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Connection.Status.Closed
@@ -136,7 +134,7 @@ class SQLite(
             }
         }
 
-        override suspend fun execute(sql: String): Result<Long> = runCatching {
+        override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 withContext(Dispatchers.IO) {
@@ -151,7 +149,7 @@ class SQLite(
         override suspend fun execute(statement: Statement): Result<Long> =
             execute(statement.render(encoders))
 
-        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+        override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
                 withContext(Dispatchers.IO) {
@@ -166,10 +164,7 @@ class SQLite(
         override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
             fetchAll(statement.render(encoders))
 
-        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-            fetchAll(statement.render(encoders), rowMapper)
-
-        override suspend fun begin(): Result<Transaction> = runCatching {
+        override suspend fun internalBegin(): Result<Transaction> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 withContext(Dispatchers.IO) {
@@ -178,7 +173,7 @@ class SQLite(
                     } catch (e: Exception) {
                         SQLError(SQLError.Code.Database, e.message).ex()
                     }
-                    Tx(connection, false, this@Cn)
+                    Tx(connection, false, hook)
                 }
             }
         }
@@ -200,13 +195,13 @@ class SQLite(
     class Tx(
         private var connection: JdbcConnection,
         private val closeConnectionAfterTx: Boolean,
-        parentInvalidationScopeProvider: TableInvalidationScopeProvider
-    ) : TxBase(parentInvalidationScopeProvider) {
+        parentHook: MutableHookEventBus,
+    ) : TxBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
         override val status: Transaction.Status get() = _status
 
-        override suspend fun commit(): Result<Unit> = runCatching {
+        override suspend fun internalCommit(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Transaction.Status.Closed
@@ -214,7 +209,6 @@ class SQLite(
                     try {
                         connection.commit()
                         connection.autoCommit = true
-                        invalidationScope.commit()
                     } catch (e: Exception) {
                         SQLError(SQLError.Code.Database, e.message).ex()
                     } finally {
@@ -224,7 +218,7 @@ class SQLite(
             }
         }
 
-        override suspend fun rollback(): Result<Unit> = runCatching {
+        override suspend fun internalRollback(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Transaction.Status.Closed
@@ -232,7 +226,6 @@ class SQLite(
                     try {
                         connection.rollback()
                         connection.autoCommit = true
-                        invalidationScope.rollback()
                     } catch (e: Exception) {
                         SQLError(SQLError.Code.Database, e.message).ex()
                     } finally {
@@ -242,7 +235,7 @@ class SQLite(
             }
         }
 
-        override suspend fun execute(sql: String): Result<Long> = runCatching {
+        override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 withContext(Dispatchers.IO) {
@@ -257,7 +250,7 @@ class SQLite(
         override suspend fun execute(statement: Statement): Result<Long> =
             execute(statement.render(encoders))
 
-        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+        override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
                 withContext(Dispatchers.IO) {
@@ -272,8 +265,6 @@ class SQLite(
         override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
             fetchAll(statement.render(encoders))
 
-        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-            fetchAll(statement.render(encoders), rowMapper)
     }
 
     companion object {
@@ -314,7 +305,7 @@ class SQLite(
         private fun createConnectionPool(
             url: String,
             options: ConnectionPool.Options,
-            invalidationScopeProvider: TableInvalidationScopeProvider
+            parentHook: MutableHookEventBus
         ): ConnectionPoolImpl {
             // Ensure the URL has the proper JDBC prefix
             val jdbcUrl = "jdbc:sqlite:${url.removePrefix("jdbc:").removePrefix("sqlite:").removePrefix("//")}"
@@ -331,11 +322,10 @@ class SQLite(
             }
 
             val connectionFactory: suspend ConnectionPool.() -> Connection = {
-                val connectionPool = this
                 withContext(Dispatchers.IO) {
                     val connection = DriverManager.getConnection(jdbcUrl)
                     connection.autoCommit = true
-                    Cn(connection, connectionPool).apply {
+                    Cn(connection, parentHook).apply {
                         // Enable WAL mode for file-based databases to improve concurrency
                         // In-memory databases don't support WAL mode
                         if (!isInMemory) {
@@ -344,7 +334,7 @@ class SQLite(
                     }
                 }
             }
-            return ConnectionPoolImpl(options, null,connectionFactory,invalidationScopeProvider)
+            return ConnectionPoolImpl(options, null, connectionFactory)
         }
     }
 }

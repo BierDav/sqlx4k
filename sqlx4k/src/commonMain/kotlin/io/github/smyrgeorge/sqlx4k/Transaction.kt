@@ -1,5 +1,9 @@
 package io.github.smyrgeorge.sqlx4k
 
+import io.github.smyrgeorge.sqlx4k.impl.hook.AfterHookEvent
+import io.github.smyrgeorge.sqlx4k.impl.hook.HookApi
+import io.github.smyrgeorge.sqlx4k.impl.hook.HookEvent
+
 /**
  * Represents a transaction in the system, providing methods to manage and execute
  * transactional operations such as commit and rollback.
@@ -7,7 +11,7 @@ package io.github.smyrgeorge.sqlx4k
  * This interface integrates with the `Driver` interface to facilitate execution
  * of SQL queries and retrieval of results within a transactional context.
  */
-interface Transaction : QueryExecutor {
+interface Transaction : QueryExecutor, HookApi {
 
     val status: Status
 
@@ -59,4 +63,43 @@ interface Transaction : QueryExecutor {
         Open,
         Closed
     }
+
+    // Commit
+    class BeforeCommitHook(override val source: Transaction) : HookEvent<Transaction>
+    class AfterCommitHook(
+        override val source: Transaction,
+        override val result: Result<Unit>
+    ) : AfterHookEvent<Transaction, Unit>
+
+
+    // Rollback
+    class BeforeRollbackHook(override val source: Transaction) : HookEvent<Transaction>
+    class AfterRollbackHook(
+        override val source: Transaction,
+        override val result: Result<Unit>
+    ) : AfterHookEvent<Transaction, Unit>
+
+    // Statement
+    sealed interface BeforeStatementHook : Hooks.BeforeStatement<Transaction>
+    sealed interface AfterStatementHook<T : Any> : Hooks.AfterStatement<Transaction, T>
+
+    // Execute
+    class BeforeExecuteHook(override val source: Transaction, override val sql: String) :
+        Hooks.BeforeExecute<Transaction>, BeforeStatementHook
+
+    class AfterExecuteHook(
+        override val source: Transaction,
+        override val statement: String,
+        override val result: Result<Long>
+    ) : Hooks.AfterExecute<Transaction>, AfterStatementHook<Long>
+
+    // FetchAll
+    class BeforeFetchAllHook(override val source: Transaction, override val sql: String) :
+        Hooks.BeforeFetchAll<Transaction>, BeforeStatementHook
+
+    class AfterFetchAllHook(
+        override val source: Transaction,
+        override val statement: String,
+        override val result: Result<ResultSet>
+    ) : Hooks.AfterFetchAll<Transaction>, AfterStatementHook<ResultSet>
 }

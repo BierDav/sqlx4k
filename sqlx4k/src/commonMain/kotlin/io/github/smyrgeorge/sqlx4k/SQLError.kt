@@ -5,11 +5,13 @@ package io.github.smyrgeorge.sqlx4k
  *
  * @property code The specific error code associated with this database error.
  * @param message An optional message providing more details about the error.
+ * @param cause An optional inner exception that caused this error.
  */
 class SQLError(
     val code: Code,
     message: String? = null,
-) : RuntimeException("[$code] :: $message") {
+    cause: Throwable? = null,
+) : RuntimeException("[$code] :: $message", cause) {
     /**
      * Throws the current instance of [SQLError].
      *
@@ -54,5 +56,6 @@ class SQLError(
         NamedParameterTypeNotSupported,
         PositionalParameterValueNotSupplied,
         NamedParameterValueNotSupplied,
+        HookExecutionFailed
     }
 }

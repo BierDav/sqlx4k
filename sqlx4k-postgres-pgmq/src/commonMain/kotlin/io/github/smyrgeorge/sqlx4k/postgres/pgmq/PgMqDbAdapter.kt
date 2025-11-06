@@ -18,8 +18,6 @@ import io.github.smyrgeorge.sqlx4k.postgres.Notification
 interface PgMqDbAdapter : QueryExecutor, QueryExecutor.Transactional, IPostgresNotifications {
     override suspend fun execute(statement: Statement): Result<Long> = execute(statement.render(encoders))
     override suspend fun fetchAll(statement: Statement): Result<ResultSet> = fetchAll(statement.render(encoders))
-    override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-        fetchAll(statement.render(encoders), rowMapper)
 
     companion object {
         private val encoders = Statement.ValueEncoderRegistry.EMPTY

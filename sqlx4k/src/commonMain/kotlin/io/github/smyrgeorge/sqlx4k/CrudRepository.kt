@@ -1,5 +1,7 @@
 package io.github.smyrgeorge.sqlx4k
 
+import kotlin.reflect.KClass
+
 /**
  * Interface defining a contract for basic CRUD (Create, Read, Update, Delete) operations on a data source.
  *
@@ -65,4 +67,61 @@ interface CrudRepository<T> {
      *         or an error if the operation fails.
      */
     suspend fun save(context: QueryExecutor, entity: T): Result<T>
+
+
+    // Insert
+    sealed class BeforeInsertHook<T : Any>(
+        val entity: T,
+        override val dependentTables: List<KClass<*>>,
+        override val source: QueryExecutor
+    ) : Hooks.BeforeRepoStatement<QueryExecutor>, Hooks.BeforeCrudRepoStatement<QueryExecutor>
+
+    sealed class AfterInsertHook<T : Any>(
+        val entity: T,
+        override val dependentTables: List<KClass<*>>,
+        override val result: Result<T>,
+        override val source: QueryExecutor
+    ) : Hooks.AfterRepoStatement<QueryExecutor, T>, Hooks.AfterCrudRepoStatement<QueryExecutor, T>
+
+    // Update
+    sealed class BeforeUpdateHook<T : Any>(
+        val entity: T,
+        override val dependentTables: List<KClass<*>>,
+        override val source: QueryExecutor
+    ) : Hooks.BeforeRepoStatement<QueryExecutor>, Hooks.BeforeCrudRepoStatement<QueryExecutor>
+
+    sealed class AfterUpdateHook<T : Any>(
+        val entity: T,
+        override val dependentTables: List<KClass<*>>,
+        override val result: Result<T>,
+        override val source: QueryExecutor
+    ) : Hooks.AfterRepoStatement<QueryExecutor, T>, Hooks.AfterCrudRepoStatement<QueryExecutor, T>
+
+    // Delete
+    sealed class BeforeDeleteHook<T : Any>(
+        val entity: T,
+        override val dependentTables: List<KClass<*>>,
+        override val source: QueryExecutor
+    ) : Hooks.BeforeRepoStatement<QueryExecutor>, Hooks.BeforeCrudRepoStatement<QueryExecutor>
+
+    sealed class AfterDeleteHook<T : Any>(
+        val entity: T,
+        override val dependentTables: List<KClass<*>>,
+        override val source: QueryExecutor,
+        override val result: Result<Unit>
+    ) : Hooks.AfterRepoStatement<QueryExecutor, Unit>, Hooks.AfterCrudRepoStatement<QueryExecutor, Unit>
+
+    // Save
+    sealed class BeforeSaveHook<T : Any>(
+        val entity: T,
+        override val dependentTables: List<KClass<*>>,
+        override val source: QueryExecutor
+    ) : Hooks.BeforeRepoStatement<QueryExecutor>, Hooks.BeforeCrudRepoStatement<QueryExecutor>
+
+    sealed class AfterSaveHook<T : Any>(
+        val entity: T,
+        override val dependentTables: List<KClass<*>>,
+        override val result: Result<T>,
+        override val source: QueryExecutor
+    ) : Hooks.AfterRepoStatement<QueryExecutor, T>, Hooks.AfterCrudRepoStatement<QueryExecutor, T>
 }

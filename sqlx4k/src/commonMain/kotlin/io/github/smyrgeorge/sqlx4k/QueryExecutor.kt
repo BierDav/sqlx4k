@@ -1,5 +1,7 @@
 package io.github.smyrgeorge.sqlx4k
 
+import io.github.smyrgeorge.sqlx4k.impl.hook.HookEvent
+import io.github.smyrgeorge.sqlx4k.impl.metadata.MetadataStorage
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
 import kotlin.time.Duration
@@ -11,8 +13,13 @@ import kotlin.time.Duration
  * transactions. It abstracts the underlying database operations and offers a coroutine-based
  * API for asynchronous execution.
  */
-interface QueryExecutor : TableInvalidationScopeProvider {
-
+interface QueryExecutor {
+    /**
+     * Metadata storage of the query executor instance. Mind that each query executor instance
+     * maintains its own metadata storage. For example, the metadata from a [Connection] will be
+     * different from the metadata of a [Transaction] or [Driver]
+     * */
+    val metadata: MetadataStorage
     /**
      * Executes the given SQL statement asynchronously.
      *
@@ -65,7 +72,9 @@ interface QueryExecutor : TableInvalidationScopeProvider {
      * @param rowMapper The RowMapper to use for converting rows in the result set to instances of type T.
      * @return A Result containing a list of instances of type T mapped from the query result set.
      */
-    suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>>
+    suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> = runCatching {
+        fetchAll(statement).getOrThrow().let { rowMapper.map(it) }
+    }
 
     /**
      * Represents a transactional interface providing methods for handling transactions.

@@ -7,11 +7,13 @@ plugins {
 kotlin {
     compilerOptions {
         optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
+        optIn.add("kotlin.concurrent.atomics.ExperimentalAtomicApi")
     }
-    compilerOptions { }
+
     @Suppress("unused")
     sourceSets {
         all {
+            languageSettings.enableLanguageFeature("NestedTypeAliases")
             languageSettings.enableLanguageFeature("ContextParameters")
         }
         configureEach {
@@ -19,6 +21,7 @@ kotlin {
         }
         val commonMain by getting {
             dependencies {
+                api("co.touchlab:stately-concurrent-collections:2.0.0")
                 api(libs.kotlinx.coroutines.core)
                 api(libs.kotlinx.datetime)
                 api(libs.kotlinx.io.core)
