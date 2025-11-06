@@ -2,6 +2,7 @@ package io.github.smyrgeorge.sqlx4k.postgres
 
 import io.github.smyrgeorge.sqlx4k.*
 import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
+import io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
 import io.github.smyrgeorge.sqlx4k.impl.types.DoubleQuotingString
@@ -50,7 +51,7 @@ class PostgreSQLImpl(
         afterFileMigration = afterFileMigration
     )
 
-    override suspend fun close(): Result<Unit> = runCatching {
+    override suspend fun internalClose(): Result<Unit> = runCatching {
         try {
             pool.disposeLater().awaitFirstOrNull()
         } catch (e: Exception) {
@@ -61,11 +62,11 @@ class PostgreSQLImpl(
     override fun poolSize(): Int = pool.metrics.getOrElse { error("No metrics available.") }.allocatedSize()
     override fun poolIdleSize(): Int = pool.metrics.getOrElse { error("No metrics available.") }.idleSize()
 
-    override suspend fun acquire(): Result<Connection> = runCatching {
-        Cn(pool.acquire(), invalidationScope, this)
+    override suspend fun internalAcquire(): Result<Connection> = runCatching {
+        Cn(pool.acquire(), hook)
     }
 
-    override suspend fun execute(sql: String): Result<Long> = runCatching {
+    override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
         @Suppress("SqlSourceToSinkFlow")
         with(pool.acquire()) {
             val res = try {
@@ -82,7 +83,7 @@ class PostgreSQLImpl(
     override suspend fun execute(statement: Statement): Result<Long> =
         execute(statement.render(encoders))
 
-    override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+    override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
         @Suppress("SqlSourceToSinkFlow")
         with(pool.acquire()) {
             val res = try {
@@ -99,7 +100,7 @@ class PostgreSQLImpl(
     override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
         fetchAll(statement.render(encoders))
 
-    override suspend fun begin(): Result<Transaction> = runCatching {
+    override suspend fun internalBegin(): Result<Transaction> = runCatching {
         with(pool.acquire()) {
             try {
                 beginTransaction().awaitFirstOrNull()
@@ -107,7 +108,7 @@ class PostgreSQLImpl(
                 close().awaitFirstOrNull()
                 SQLError(SQLError.Code.Database, e.message).ex()
             }
-            Tx(this, true, this@PostgreSQLImpl)
+            Tx(this, true, hook)
         }
     }
 
@@ -224,16 +225,13 @@ class PostgreSQLImpl(
      */
     class Cn(
         private val connection: R2dbcConnection,
-        private val parentInvalidationScope: TableInvalidationScope,
-        parentScopeProvider: TableInvalidationScopeProvider
-    ) : CnBase(parentScopeProvider, TODO()) {
+        parentHook: MutableHookEventBus,
+    ) : CnBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
-        override val invalidationScope: TableInvalidationScope
-            get() = parentInvalidationScope
 
-        override suspend fun close(): Result<Unit> = runCatching {
+        override suspend fun internalClose(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Connection.Status.Closed
@@ -242,7 +240,7 @@ class PostgreSQLImpl(
         }
 
 
-        override suspend fun execute(sql: String): Result<Long> = runCatching {
+        override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 @Suppress("SqlSourceToSinkFlow")
@@ -253,7 +251,7 @@ class PostgreSQLImpl(
         override suspend fun execute(statement: Statement): Result<Long> =
             execute(statement.render(encoders))
 
-        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+        override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
                 @Suppress("SqlSourceToSinkFlow")
@@ -264,7 +262,7 @@ class PostgreSQLImpl(
         override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
             fetchAll(statement.render(encoders))
 
-        override suspend fun begin(): Result<Transaction> = runCatching {
+        override suspend fun internalBegin(): Result<Transaction> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 try {
@@ -272,7 +270,7 @@ class PostgreSQLImpl(
                 } catch (e: Exception) {
                     SQLError(SQLError.Code.Database, e.message).ex()
                 }
-                Tx(connection, false, this)
+                Tx(connection, false, hook)
             }
         }
     }
@@ -291,19 +289,18 @@ class PostgreSQLImpl(
     class Tx(
         private var connection: R2dbcConnection,
         private val closeConnectionAfterTx: Boolean,
-        parentInvalidationScopeProvider: TableInvalidationScopeProvider,
-    ) : TxBase(parentInvalidationScopeProvider, TODO(), TODO()) {
+        parentHook: MutableHookEventBus,
+    ) : TxBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
         override val status: Transaction.Status get() = _status
 
-        override suspend fun commit(): Result<Unit> = runCatching {
+        override suspend fun internalCommit(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Transaction.Status.Closed
                 try {
                     connection.commitTransaction().awaitFirstOrNull()
-                    invalidationScope.commit()
                 } catch (e: Exception) {
                     SQLError(SQLError.Code.Database, e.message).ex()
                 } finally {
@@ -312,13 +309,12 @@ class PostgreSQLImpl(
             }
         }
 
-        override suspend fun rollback(): Result<Unit> = runCatching {
+        override suspend fun internalRollback(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Transaction.Status.Closed
                 try {
                     connection.rollbackTransaction().awaitFirstOrNull()
-                    invalidationScope.rollback()
                 } catch (e: Exception) {
                     SQLError(SQLError.Code.Database, e.message).ex()
                 } finally {
@@ -327,7 +323,7 @@ class PostgreSQLImpl(
             }
         }
 
-        override suspend fun execute(sql: String): Result<Long> = runCatching {
+        override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 @Suppress("SqlSourceToSinkFlow")
@@ -338,7 +334,7 @@ class PostgreSQLImpl(
         override suspend fun execute(statement: Statement): Result<Long> =
             execute(statement.render(encoders))
 
-        override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
+        override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
                 @Suppress("SqlSourceToSinkFlow")

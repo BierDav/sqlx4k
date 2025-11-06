@@ -2,6 +2,7 @@ package io.github.smyrgeorge.sqlx4k.postgres.pgmq.r2dbc
 
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.ResultSet
+import io.github.smyrgeorge.sqlx4k.impl.metadata.MetadataStorage
 import io.github.smyrgeorge.sqlx4k.postgres.IPostgresNotifications
 import io.github.smyrgeorge.sqlx4k.postgres.PostgreSQLImpl
 import io.github.smyrgeorge.sqlx4k.postgres.pgmq.PgMqDbAdapter
@@ -22,10 +23,11 @@ import io.r2dbc.postgresql.PostgresqlConnectionFactory
 class PgMqDbAdapterR2dbc(
     private val connectionFactory: PostgresqlConnectionFactory,
     pool: ConnectionPool,
-    private val adapter: PostgreSQLImpl = PostgreSQLImpl(connectionFactory, pool)
+    private val adapter: PostgreSQLImpl = PostgreSQLImpl(connectionFactory, pool),
 ) : PgMqDbAdapter,
     QueryExecutor.Transactional by adapter,
     IPostgresNotifications by adapter {
+    override val metadata: MetadataStorage = adapter.metadata
 
     override suspend fun execute(sql: String): Result<Long> = adapter.execute(sql)
 

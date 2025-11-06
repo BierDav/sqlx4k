@@ -1,4 +1,4 @@
-group = "io.github.smyrgeorge"
+group = "at.quickme.sqlx4k"
 version = "1.4.1"
 
 plugins {

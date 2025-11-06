@@ -10,6 +10,10 @@ plugins {
 kotlin {
     @Suppress("unused")
     sourceSets {
+        all {
+            languageSettings.enableLanguageFeature("NestedTypeAliases")
+            languageSettings.enableLanguageFeature("ContextParameters")
+        }
         val commonMain by getting {
             dependencies {
                 implementation(project(":sqlx4k-postgres-pgmq"))
