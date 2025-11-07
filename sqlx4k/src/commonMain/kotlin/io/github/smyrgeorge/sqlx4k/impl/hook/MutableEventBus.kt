@@ -8,7 +8,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.reflect.KClass
-import kotlin.system.measureNanoTime
+import kotlin.time.measureTime
 
 class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) : EventBus<T> {
     private val listenersMutex = Mutex()
@@ -67,13 +67,13 @@ class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) :
         }
         var listeners: Set<EventBus.Subscriber<*>>? = null
 
-        measureNanoTime {
+        measureTime {
             listeners = this.listeners.load().filter { it.key.isInstance(value) }.flatMap { it.value }.toSet()
             if (listeners.isEmpty()) {
                 parentEventBus?.publish(type, lazyValue)
                 return
             }
-        }.let { println("lookup took: ${it} ns") }
+        }.let { println("lookup took: ${it.inWholeNanoseconds} ns") }
 
 
         try {

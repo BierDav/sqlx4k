@@ -5,7 +5,6 @@ import io.github.smyrgeorge.sqlx4k.impl.metadata.MetadataStorage
 import io.github.smyrgeorge.sqlx4k.postgres.IPostgresNotifications
 import io.github.smyrgeorge.sqlx4k.postgres.IPostgresSQL
 import io.github.smyrgeorge.sqlx4k.postgres.pgmq.PgMqDbAdapter
-import javax.swing.plaf.nimbus.State
 
 class PgMqDbAdapterImpl(private val pg: IPostgresSQL) : PgMqDbAdapter,
     QueryExecutor.Transactional by pg,

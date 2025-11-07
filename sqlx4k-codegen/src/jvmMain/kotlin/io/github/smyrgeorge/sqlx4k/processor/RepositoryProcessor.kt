@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import java.io.OutputStream
 import kotlin.reflect.KClass
 
-class RepositoryProcessor(
+open class RepositoryProcessor(
     private val options: Map<String, String>,
     private val logger: KSPLogger,
     private val codeGenerator: CodeGenerator,
@@ -69,6 +69,7 @@ class RepositoryProcessor(
         file += "import ${TypeNames.HOOK_API}\n"
         file += "import ${TypeNames.HOOKS}\n"
         file += "import ${TypeNames.MUTABLE_HOOK_EVENT_BUS}\n"
+        file += additionalImports()
 
         // For each repository interface, find methods annotated with @Query
         val validatedRepos = repoSymbols.filter { it.validate() }
@@ -112,6 +113,7 @@ class RepositoryProcessor(
                         domainDecl = domainDecl,
                         useContextParameters = useContextParameters,
                         tableLookup = tableLookup,
+                        repo = repo
                     )
                 }
 
@@ -122,7 +124,7 @@ class RepositoryProcessor(
                 domainDecl = domainDecl,
                 mapperTypeName = mapperTypeName,
                 useContextParameters = useContextParameters,
-                tableLookup = tableLookup,
+                repo = repo
             )
             file += "}\n"
         }
@@ -316,7 +318,8 @@ class RepositoryProcessor(
             ?: error("${fn.getLocationLink()}: Unable to resolve return type for method '$name'")
 
         fun ensureResult(inner: KSType, isFlow: Boolean): KSType {
-            val expectedType = if(isFlow) "${Flow::class.qualifiedName}<${Result::class.qualifiedName}<...>>" else "${Result::class.qualifiedName}<...>"
+            val expectedType =
+                if (isFlow) "${Flow::class.qualifiedName}<${Result::class.qualifiedName}<...>>" else "${Result::class.qualifiedName}<...>"
             var start = inner
             if (isFlow) {
                 if (inner.declaration.qualifiedName() != TypeNames.KOTLIN_FLOW || inner.isMarkedNullable)
@@ -533,7 +536,8 @@ class RepositoryProcessor(
         mapperTypeName: String,
         domainDecl: KSClassDeclaration,
         useContextParameters: Boolean,
-        tableLookup: TableLookup
+        tableLookup: TableLookup,
+        repo: KSClassDeclaration
     ) {
         val name = fn.simpleName()
         val prefix: Prefix = parseMethodPrefix(name)
@@ -573,7 +577,7 @@ class RepositoryProcessor(
         if (isIndependent && explicitDependentTables != null && explicitDependentTables.isNotEmpty())
             error("Query marked as independent mustn't specify explicitDependentTables: $fn")
         var dependentTables = explicitDependentTables?.mapNotNull { it.qualifiedName }
-        
+
         if (dependentTables == null) {
             dependentTables = analysis?.dependentTables?.mapNotNull {
                 val result = tableLookup[it]
@@ -586,7 +590,7 @@ class RepositoryProcessor(
                 logger.warn("[RepositoryProcessor] Query analysis returned no dependent tables. Please provide explicit dependencies (${fn.simpleName()}): $sql")
 
         }
-        
+
         var dependentTablesArg = ""
         if (!isIndependent && dependentTables != null && dependentTables.isNotEmpty())
             dependentTablesArg = dependentTables.joinToString(", ") { "$it::class" }
@@ -685,6 +689,12 @@ class RepositoryProcessor(
                                     hook?.publish { Hooks.Repository.BeforeCrudRepoHook(listOf($dependentTablesArg), context) }
                                     val result = $contextParamName.execute(statement)
                                     hook?.publish { Hooks.Repository.AfterCrudRepoHook(listOf($dependentTablesArg), result, context) }
+                                    ${
+                    additionalAfterCrudHook(
+                        repo, name, dependentTablesArg, params
+                            .drop(if (useContextParameters) 0 else 1)
+                            .joinToString { it.name?.asString() ?: "<Parameter name was null>" })
+                }
                                     result
                         """.trimIndent()
             }
@@ -726,7 +736,7 @@ class RepositoryProcessor(
         domainDecl: KSClassDeclaration,
         mapperTypeName: String,
         useContextParameters: Boolean,
-        tableLookup: TableLookup
+        repo: KSClassDeclaration
     ) {
         val domainQn = domainDecl.qualifiedName() ?: error("Cannot resolve domain type name")
         val domainSimpleName = domainDecl.simpleName()
@@ -764,6 +774,7 @@ class RepositoryProcessor(
                                one
                            }
                            hook?.publish { CrudRepository.AfterInsertHook(entity, listOf($dependentTablesArg), result, context) }
+                           ${additionalAfterCrudHook(repo, "insert", dependentTablesArg, "entity")}
                            result
                        }
                    """.trimIndent()
@@ -798,6 +809,7 @@ class RepositoryProcessor(
                                one
                            }
                            hook?.publish { CrudRepository.AfterUpdateHook(entity, listOf($dependentTablesArg), result, context) }
+                           ${additionalAfterCrudHook(repo, "update", dependentTablesArg, "entity")}
                            result
                        }
                    """
@@ -827,6 +839,8 @@ class RepositoryProcessor(
                            val statement = entity.delete()
                            val result = context.execute(statement).map { kotlin.Unit }
                            hook?.publish { CrudRepository.AfterDeleteHook(entity, listOf($dependentTablesArg), result, context) }
+                           hook?.publish { EventHook(listOf($dependentTablesArg), result, context, ) }
+                           ${additionalAfterCrudHook(repo, "delete", dependentTablesArg, "entity")}
                            result
                        }
                    """
@@ -897,6 +911,18 @@ class RepositoryProcessor(
         val file = this.containingFile ?: return "[Unknown File]"
         return file.filePath
     }
+
+    /***
+     * Specifically designed for ksync to integrate its event hooks
+     */
+    open fun additionalAfterCrudHook(
+        repo: KSClassDeclaration,
+        fnName: String,
+        dependentTablesArg: String,
+        fnParams: String
+    ) = ""
+
+    open fun additionalImports() = ""
 
     companion object {
         /**
