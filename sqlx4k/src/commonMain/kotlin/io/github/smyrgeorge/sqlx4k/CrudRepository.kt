@@ -74,40 +74,40 @@ interface CrudRepository<T> {
         val entity: T,
         override val dependentTables: List<KClass<*>>,
         override val source: QueryExecutor
-    ) : Hooks.BeforeRepoStatement<QueryExecutor>, Hooks.BeforeCrudRepoStatement<QueryExecutor>
+    ) : Hooks.BeforeCrudRepoStatement<QueryExecutor>
 
     class AfterInsertHook<T : Any>(
         val entity: T,
         override val dependentTables: List<KClass<*>>,
         override val result: Result<T>,
         override val source: QueryExecutor
-    ) : Hooks.AfterRepoStatement<QueryExecutor, T>, Hooks.AfterCrudRepoStatement<QueryExecutor, T>
+    ) : Hooks.AfterCrudRepoStatement<QueryExecutor, T>
 
     // Update
     class BeforeUpdateHook<T : Any>(
         val entity: T,
         override val dependentTables: List<KClass<*>>,
         override val source: QueryExecutor
-    ) : Hooks.BeforeRepoStatement<QueryExecutor>, Hooks.BeforeCrudRepoStatement<QueryExecutor>
+    ) : Hooks.BeforeCrudRepoStatement<QueryExecutor>
 
     class AfterUpdateHook<T : Any>(
         val entity: T,
         override val dependentTables: List<KClass<*>>,
         override val result: Result<T>,
         override val source: QueryExecutor
-    ) : Hooks.AfterRepoStatement<QueryExecutor, T>, Hooks.AfterCrudRepoStatement<QueryExecutor, T>
+    ) : Hooks.AfterCrudRepoStatement<QueryExecutor, T>
 
     // Delete
     class BeforeDeleteHook<T : Any>(
         val entity: T,
         override val dependentTables: List<KClass<*>>,
         override val source: QueryExecutor
-    ) : Hooks.BeforeRepoStatement<QueryExecutor>, Hooks.BeforeCrudRepoStatement<QueryExecutor>
+    ) : Hooks.BeforeCrudRepoStatement<QueryExecutor>
 
     class AfterDeleteHook<T : Any>(
         val entity: T,
         override val dependentTables: List<KClass<*>>,
         override val result: Result<Unit>,
         override val source: QueryExecutor,
-    ) : Hooks.AfterRepoStatement<QueryExecutor, Unit>, Hooks.AfterCrudRepoStatement<QueryExecutor, Unit>
+    ) : Hooks.AfterCrudRepoStatement<QueryExecutor, Unit>
 }

@@ -8,6 +8,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.reflect.KClass
+import kotlin.system.measureNanoTime
 
 class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) : EventBus<T> {
     private val listenersMutex = Mutex()
@@ -20,7 +21,7 @@ class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) :
         handler: EventBus.Subscriber<K>
     ) {
         if (!enableGlobally)
-            error("Event bus is not enabled globally. Please enable it by setting the 'MutableEventBus.enableGlobally' flag to true.")
+            error("Event bus is not enabled globally. Please enable it by setting the `MutableEventBus.enableGlobally` flag to true.")
         val eventTypes = otherTypes.toSet() + firstType
         listenersMutex.withLock {
             val newMap = listeners.load().toMutableMap()
@@ -64,18 +65,21 @@ class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) :
 //                value = lazyValue()
             value
         }
+        var listeners: Set<EventBus.Subscriber<*>>? = null
 
-        val listeners = listeners.load().filter { it.key.isInstance(value) }.flatMap { it.value }.toSet()
-        if (listeners.isEmpty()) {
-            parentEventBus?.publish(type, lazyValue)
-            return
-        }
+        measureNanoTime {
+            listeners = this.listeners.load().filter { it.key.isInstance(value) }.flatMap { it.value }.toSet()
+            if (listeners.isEmpty()) {
+                parentEventBus?.publish(type, lazyValue)
+                return
+            }
+        }.let { println("lookup took: ${it} ns") }
 
 
         try {
             coroutineScope {
                 parentEventBus?.let { launch { it.publish(type, getLazyValue) } }
-                for (handler in listeners) {
+                for (handler in listeners!!) {
                     launch {
                         @Suppress("UNCHECKED_CAST")
                         (handler as EventBus.Subscriber<T>).invoke(getLazyValue())

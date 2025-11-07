@@ -24,6 +24,7 @@ object TypeNames {
     const val QUERY_EXECUTOR = "io.github.smyrgeorge.sqlx4k.QueryExecutor"
     const val LISTEN_FOR_INVALIDATION = "io.github.smyrgeorge.sqlx4k.invalidation.listenForInvalidation"
     const val HOOK_API = "io.github.smyrgeorge.sqlx4k.impl.hook.HookApi"
+    const val HOOKS = "io.github.smyrgeorge.sqlx4k.Hooks"
     const val MUTABLE_HOOK_EVENT_BUS = "io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus"
     const val STATEMENT = "io.github.smyrgeorge.sqlx4k.Statement"
 

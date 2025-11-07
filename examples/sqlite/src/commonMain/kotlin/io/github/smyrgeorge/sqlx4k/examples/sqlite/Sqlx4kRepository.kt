@@ -19,4 +19,7 @@ interface Sqlx4kRepository : CrudRepository<Sqlx4k> {
 
     @Query("SELECT count(*) FROM sqlx4k")
     fun countAllFlow(context: QueryExecutor): Flow<Result<Long>>
+
+    @Query("DELETE FROM sqlx4k")
+    suspend fun deleteAll(context: QueryExecutor): Result<Long>
 }

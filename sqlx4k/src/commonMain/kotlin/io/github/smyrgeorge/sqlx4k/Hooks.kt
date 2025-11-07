@@ -6,7 +6,8 @@ import kotlin.reflect.KClass
 
 interface Hooks {
     sealed interface BeforeBeginTransaction<T : QueryExecutor> : HookEvent<T>
-    sealed interface AfterBeginTransaction<T : QueryExecutor> : AfterHookEvent<T, io.github.smyrgeorge.sqlx4k.Transaction>
+    sealed interface AfterBeginTransaction<T : QueryExecutor> :
+        AfterHookEvent<T, io.github.smyrgeorge.sqlx4k.Transaction>
 
     // Statement
     sealed interface BeforeStatement<T : QueryExecutor> : HookEvent<T> {
@@ -32,13 +33,27 @@ interface Hooks {
         val dependentTables: List<KClass<*>>
     }
 
-    interface AfterRepoStatement<T : QueryExecutor, K : Any> : AfterHookEvent<T,K > {
+    interface AfterRepoStatement<T : QueryExecutor, K : Any> : AfterHookEvent<T, K> {
         val dependentTables: List<KClass<*>>
     }
 
 
     interface BeforeCrudRepoStatement<T : QueryExecutor> : BeforeRepoStatement<T>
-    interface AfterCrudRepoStatement<T : QueryExecutor, K : Any> : AfterRepoStatement<T,K>
+    interface AfterCrudRepoStatement<T : QueryExecutor, K : Any> : AfterRepoStatement<T, K>
+
+
+    interface Repository {
+        class BeforeCrudRepoHook(
+            override val dependentTables: List<KClass<*>>,
+            override val source: QueryExecutor
+        ) : BeforeCrudRepoStatement<QueryExecutor>
+
+        class AfterCrudRepoHook(
+            override val dependentTables: List<KClass<*>>,
+            override val result: Result<Long>,
+            override val source: QueryExecutor
+        ) : AfterCrudRepoStatement<QueryExecutor, Long>
+    }
 
 
     sealed interface Driver {

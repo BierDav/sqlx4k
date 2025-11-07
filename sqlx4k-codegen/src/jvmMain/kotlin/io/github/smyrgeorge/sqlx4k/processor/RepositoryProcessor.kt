@@ -67,6 +67,7 @@ class RepositoryProcessor(
         file += "import ${TypeNames.LISTEN_FOR_INVALIDATION}\n"
         file += "import ${TypeNames.CRUD_REPOSITORY}\n"
         file += "import ${TypeNames.HOOK_API}\n"
+        file += "import ${TypeNames.HOOKS}\n"
         file += "import ${TypeNames.MUTABLE_HOOK_EVENT_BUS}\n"
 
         // For each repository interface, find methods annotated with @Query
@@ -680,8 +681,12 @@ class RepositoryProcessor(
             }
 
             Prefix.DELETE_ALL, Prefix.DELETE_BY, Prefix.EXECUTE -> {
-                file += "        $contextParamName.execute(statement)\n"
-                file += "        $contextParamName.invalidationScope.invalidate(${dependentTablesArg})\n"
+                file += """         val hook = if (context is HookApi) context.hook as MutableHookEventBus else null
+                                    hook?.publish { Hooks.Repository.BeforeCrudRepoHook(listOf($dependentTablesArg), context) }
+                                    val result = $contextParamName.execute(statement)
+                                    hook?.publish { Hooks.Repository.AfterCrudRepoHook(listOf($dependentTablesArg), result, context) }
+                                    result
+                        """.trimIndent()
             }
 
             Prefix.COUNT_ALL, Prefix.COUNT_BY -> {
