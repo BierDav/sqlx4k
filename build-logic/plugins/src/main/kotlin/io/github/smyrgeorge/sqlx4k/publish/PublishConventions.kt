@@ -4,7 +4,11 @@ import com.vanniktech.maven.publish.KotlinMultiplatform
 import com.vanniktech.maven.publish.MavenPublishBaseExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.publish.PublishingExtension
 import org.gradle.kotlin.dsl.configure
+import org.gradle.plugins.signing.SigningExtension
+import java.net.URI
+import java.util.Properties
 
 @Suppress("unused")
 class PublishConventions : Plugin<Project> {
@@ -20,6 +24,7 @@ class PublishConventions : Plugin<Project> {
 
     override fun apply(project: Project) {
         project.plugins.apply("com.vanniktech.maven.publish")
+        project.plugins.apply("signing")
         project.extensions.configure<MavenPublishBaseExtension> {
             // Source publishing is always enabled by the Kotlin Multiplatform plugin.
             configure(
@@ -63,10 +68,34 @@ class PublishConventions : Plugin<Project> {
             }
 
             // Configure publishing to Maven Central
-            // publishToMavenCentral()
 
             // Enable GPG signing for all publications
-           // signAllPublications()
+            // signAllPublications()
+        }
+        val localProperties = Properties()
+        val localPropertiesFile = project.rootProject.file("local.properties")
+        if (localPropertiesFile.exists()) {
+            localPropertiesFile.inputStream().use { stream -> localProperties.load(stream) }
+        }
+
+        project.extensions.configure<SigningExtension> {
+            useInMemoryPgpKeys(
+                localProperties.getProperty("signingInMemoryKeyId"),
+                localProperties.getProperty("signingInMemoryKey"),
+                localProperties.getProperty("signingInMemoryKeyPassword"),
+            )
+        }
+        project.extensions.configure<PublishingExtension> {
+            repositories {
+                maven {
+                    name = "Github"
+                    url = URI.create("https://maven.pkg.github.com/BierDav/sqlx4k")
+                    credentials {
+                        username = localProperties.getProperty("githubActor")
+                        password = localProperties.getProperty("githubToken")
+                    }
+                }
+            }
         }
     }
 }
