@@ -1,5 +1,5 @@
 group = "at.quickme.ksync"
-version = "1.4.16"
+version = "1.4.18"
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false

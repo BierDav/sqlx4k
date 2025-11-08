@@ -769,10 +769,12 @@ open class RepositoryProcessor(
         file += """        val hook = if (context is HookApi) context.hook as MutableHookEventBus else null
                            hook?.publish { CrudRepository.BeforeInsertHook(entity, listOf($dependentTablesArg), context) }
                            val statement = entity.insert()
-                           val result = context.fetchAll(statement, $mapperTypeName).map { list ->
-                               val one = list.firstOrNull()
-                                   ?: return@run Result.failure(IllegalStateException("Insert query returned no rows"))
-                               one
+                           val result = context.fetchAll(statement, $mapperTypeName).run {
+                               map { list ->
+                                   val one = list.firstOrNull()
+                                       ?: return@run Result.failure(IllegalStateException("Insert query returned no rows"))
+                                   one
+                               }
                            }
                            hook?.publish { CrudRepository.AfterInsertHook(entity, listOf($dependentTablesArg), result, context) }
                            ${additionalAfterCrudHook(repo, "insert", dependentTablesArg, "entity")}
@@ -804,10 +806,12 @@ open class RepositoryProcessor(
         file += """        val hook = if (context is HookApi) context.hook as MutableHookEventBus else null
                            hook?.publish { CrudRepository.BeforeUpdateHook(entity, listOf($dependentTablesArg), context) }
                            val statement = entity.update()
-                           val result = context.fetchAll(statement, $mapperTypeName).map { list ->
-                               val one = list.firstOrNull()
-                                   ?: return@run Result.failure(IllegalStateException("Update query returned no rows"))
-                               one
+                           val result = context.fetchAll(statement, $mapperTypeName).run {
+                               map { list ->
+                                   val one = list.firstOrNull()
+                                         ?: return@run Result.failure(IllegalStateException("Update query returned no rows"))
+                                   one 
+                               }
                            }
                            hook?.publish { CrudRepository.AfterUpdateHook(entity, listOf($dependentTablesArg), result, context) }
                            ${additionalAfterCrudHook(repo, "update", dependentTablesArg, "entity")}
