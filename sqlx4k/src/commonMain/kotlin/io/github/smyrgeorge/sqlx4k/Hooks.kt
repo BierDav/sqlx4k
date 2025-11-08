@@ -7,7 +7,7 @@ import kotlin.reflect.KClass
 interface Hooks {
     sealed interface BeforeBeginTransaction<T : QueryExecutor> : HookEvent<T>
     sealed interface AfterBeginTransaction<T : QueryExecutor> :
-        AfterHookEvent<T, io.github.smyrgeorge.sqlx4k.Transaction>
+        AfterHookEvent<T, Transaction>
 
     // Statement
     sealed interface BeforeStatement<T : QueryExecutor> : HookEvent<T> {
@@ -56,7 +56,7 @@ interface Hooks {
     }
 
 
-    sealed interface Driver {
+    /*sealed interface Driver {
         // Open connection
         @Deprecated(
             "Use Driver.BeforeOpenConnectionHook instead",
@@ -109,5 +109,5 @@ interface Hooks {
 
     sealed interface ConnectionPool {
 
-    }
+    }*/
 }

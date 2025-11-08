@@ -1,6 +1,5 @@
 import org.gradle.internal.extensions.stdlib.capitalized
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 
 plugins {
 //    id("io.github.smyrgeorge.sqlx4k.multiplatform.binaries")
@@ -11,10 +10,6 @@ plugins {
 kotlin {
     jvm()
     sourceSets {
-        all {
-            languageSettings.enableLanguageFeature("NestedTypeAliases")
-            languageSettings.enableLanguageFeature("ContextParameters")
-        }
         commonMain {
             dependencies {
                 implementation(project(":sqlx4k-sqlite"))

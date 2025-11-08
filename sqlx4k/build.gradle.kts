@@ -12,7 +12,6 @@ kotlin {
 
     sourceSets {
         all {
-            languageSettings.enableLanguageFeature("NestedTypeAliases")
             languageSettings.enableLanguageFeature("ContextParameters")
         }
         configureEach {

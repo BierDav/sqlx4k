@@ -12,13 +12,13 @@ import kotlin.time.measureTime
 
 class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) : EventBus<T> {
     private val listenersMutex = Mutex()
-    private val listeners = AtomicReference(mapOf<KClass<*>, Set<EventBus.Subscriber<*>>>())
+    private val listeners = AtomicReference(mapOf<KClass<*>, Set<EventBusSubscriber<*>>>())
 
 
     override suspend fun <K : T> subscribe(
         firstType: KClass<K>,
         vararg otherTypes: KClass<K>,
-        handler: EventBus.Subscriber<K>
+        handler: EventBusSubscriber<K>
     ) {
         if (!enableGlobally)
             error("Event bus is not enabled globally. Please enable it by setting the `MutableEventBus.enableGlobally` flag to true.")
@@ -65,7 +65,7 @@ class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) :
 //                value = lazyValue()
             value
         }
-        var listeners: Set<EventBus.Subscriber<*>>? = null
+        var listeners: Set<EventBusSubscriber<*>>? = null
 
         measureTime {
             listeners = this.listeners.load().filter { it.key.isInstance(value) }.flatMap { it.value }.toSet()
@@ -82,7 +82,7 @@ class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) :
                 for (handler in listeners!!) {
                     launch {
                         @Suppress("UNCHECKED_CAST")
-                        (handler as EventBus.Subscriber<T>).invoke(getLazyValue())
+                        (handler as EventBusSubscriber<T>).invoke(getLazyValue())
                     }
                 }
             }

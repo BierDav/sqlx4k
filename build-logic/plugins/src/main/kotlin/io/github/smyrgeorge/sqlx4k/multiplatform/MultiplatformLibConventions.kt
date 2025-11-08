@@ -74,7 +74,7 @@ class MultiplatformLibConventions : Plugin<Project> {
                 Pair("jvm") {
                     jvm {
                         compilerOptions {
-                            jvmTarget.set(JvmTarget.JVM_21)
+                            jvmTarget.set(JvmTarget.JVM_17)
                         }
                     }
                 },

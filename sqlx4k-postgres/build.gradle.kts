@@ -9,10 +9,6 @@ kotlin {
         configureEach {
             languageSettings.progressiveMode = true
         }
-        all {
-            languageSettings.enableLanguageFeature("NestedTypeAliases")
-            languageSettings.enableLanguageFeature("ContextParameters")
-        }
         commonMain {
             dependencies {
                 api(project(":sqlx4k"))

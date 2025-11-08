@@ -1,13 +1,13 @@
 package io.github.smyrgeorge.sqlx4k.impl.hook
 
-import io.github.smyrgeorge.sqlx4k.impl.hook.EventBus.Subscriber
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.reflect.KClass
 
 
+typealias EventBusSubscriber<T> = suspend (event: T) -> Unit
+
 interface EventBus<T : Any> {
-    typealias Subscriber<T> = suspend (event: T) -> Unit
 
     /**
      * Suspends and keeps [handler] subscribed until the caller's coroutine is cancelled.
@@ -20,7 +20,7 @@ interface EventBus<T : Any> {
      * @param otherTypes Additional event types to subscribe to.
      * @param handler The concurrent handler to be invoked when an event of the specified type is published.
      */
-    suspend fun <K : T> subscribe(firstType: KClass<K>, vararg otherTypes: KClass<K>, handler: Subscriber<K>)
+    suspend fun <K : T> subscribe(firstType: KClass<K>, vararg otherTypes: KClass<K>, handler: EventBusSubscriber<K>)
 
 }
 
@@ -36,11 +36,11 @@ interface EventBus<T : Any> {
  * @param otherTypes Additional event types to subscribe to.
  * @param handler The concurrent handler to be invoked when an event of the specified type is published.
  */
-context(scope: CoroutineScope)
 fun <K : T, T : Any> EventBus<T>.subscribeAsync(
+    scope: CoroutineScope,
     firstType: KClass<K>,
     vararg otherTypes: KClass<K>,
-    handler: Subscriber<K>
+    handler: EventBusSubscriber<K>
 ) = scope.launch { subscribe(firstType, *otherTypes, handler = handler) }
 
 
