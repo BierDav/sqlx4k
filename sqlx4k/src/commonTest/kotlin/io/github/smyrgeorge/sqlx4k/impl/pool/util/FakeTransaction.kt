@@ -1,7 +1,6 @@
 package io.github.smyrgeorge.sqlx4k.impl.pool.util
 
 import io.github.smyrgeorge.sqlx4k.ResultSet
-import io.github.smyrgeorge.sqlx4k.RowMapper
 import io.github.smyrgeorge.sqlx4k.Statement
 import io.github.smyrgeorge.sqlx4k.Transaction
 import io.github.smyrgeorge.sqlx4k.impl.invalidation.TrackOnlyTableInvalidationScope
@@ -20,8 +19,9 @@ class FakeTransaction : Transaction {
         return Result.success(Unit)
     }
 
+    override val encoders: Statement.ValueEncoderRegistry = Statement.ValueEncoderRegistry.EMPTY
+
     override suspend fun execute(sql: String): Result<Long> = Result.success(0)
-    override suspend fun execute(statement: Statement): Result<Long> = Result.success(0)
     override suspend fun fetchAll(sql: String): Result<ResultSet> =
         Result.success(ResultSet(emptyList(), null, ResultSet.Metadata(emptyList())))
 }

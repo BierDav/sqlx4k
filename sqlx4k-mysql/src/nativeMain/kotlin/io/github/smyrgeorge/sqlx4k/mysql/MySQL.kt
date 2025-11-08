@@ -1,11 +1,13 @@
 package io.github.smyrgeorge.sqlx4k.mysql
 
 import io.github.smyrgeorge.sqlx4k.*
+import io.github.smyrgeorge.sqlx4k.Transaction.IsolationLevel
 import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
 import io.github.smyrgeorge.sqlx4k.impl.extensions.*
 import io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
+import io.github.smyrgeorge.sqlx4k.impl.types.NoQuotingString
 import kotlinx.cinterop.CPointed
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -28,6 +30,7 @@ import kotlin.time.Duration
  * @param username The username for authenticating with the database.
  * @param password The password for authenticating with the database.
  * @param options The optional configuration for the connection pool, such as min/max connections and timeout settings.
+ * @param encoders Optional registry of value encoders to use for encoding query parameters.
  */
 @OptIn(ExperimentalForeignApi::class)
 class MySQL(
@@ -35,6 +38,7 @@ class MySQL(
     username: String,
     password: String,
     options: ConnectionPool.Options = ConnectionPool.Options(),
+    override val encoders: Statement.ValueEncoderRegistry = Statement.ValueEncoderRegistry()
 ) : IMySQL, DriverBase() {
     private val rt: CPointer<out CPointed> = sqlx4k_of(
         url = url,
@@ -75,16 +79,13 @@ class MySQL(
     override suspend fun internalAcquire(): Result<Connection> = runCatching {
         sqlx { c -> sqlx4k_cn_acquire(rt, c, DriverNativeUtils.fn) }.use {
             it.throwIfError()
-            Cn(rt, it.cn!!, hook)
+            Cn(rt, it.cn!!, encoders, hook)
         }
     }
 
     override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
         sqlx { c -> sqlx4k_query(rt, sql, c, DriverNativeUtils.fn) }.rowsAffectedOrError()
     }
-
-    override suspend fun execute(statement: Statement): Result<Long> =
-        execute(statement.render(encoders))
 
     override suspend fun internalFetchAll(sql: String): Result<ResultSet> {
         val res = sqlx { c -> sqlx4k_fetch_all(rt, sql, c, DriverNativeUtils.fn) }
@@ -94,25 +95,16 @@ class MySQL(
     override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
         fetchAll(statement.render(encoders))
 
+    override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
+        fetchAll(statement.render(encoders), rowMapper)
+
     override suspend fun internalBegin(): Result<Transaction> = runCatching {
         sqlx { c -> sqlx4k_tx_begin(rt, c, DriverNativeUtils.fn) }.use {
             it.throwIfError()
-            Tx(rt, it.tx!!,hook)
+            Tx(rt, it.tx!!, encoders, hook)
         }
     }
 
-    /**
-     * Represents a native database connection that implements the `Connection` interface.
-     *
-     * This class encapsulates a low-level, pointer-based interface to interact directly with
-     * a database connection and provides methods for executing queries, transactions, and managing
-     * the connection lifecycle.
-     *
-     * @constructor Creates a new instance of the `Cn` class.
-     * @property rt A `CPointer` representing the runtime context for the connection.
-     *              This pointer is required for any database operations performed through this connection.
-     * @property cn A `CPointer` representing the native connection object.
-     */
     class Cn(
         private val rt: CPointer<out CPointed>,
         private val cn: CPointer<out CPointed>,
@@ -121,27 +113,52 @@ class MySQL(
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
+        private var _transactionIsolationLevel: IsolationLevel? = null
+        override val transactionIsolationLevel: IsolationLevel? get() = _transactionIsolationLevel
 
         override suspend fun internalClose(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Connection.Status.Closed
+
+                transactionIsolationLevel?.let {
+                    val default = IMySQL.DEFAULT_TRANSACTION_ISOLATION_LEVEL
+                    setTransactionIsolationLevel(default, false)
+                }
+
                 sqlx { c -> sqlx4k_cn_release(rt, cn, c, DriverNativeUtils.fn) }.throwIfError()
             }
         }
 
-        override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
-            mutex.withLock {
-                assertIsOpen()
+        private suspend fun setTransactionIsolationLevel(level: IsolationLevel, lock: Boolean): Result<Unit> {
+            // language=SQL
+            val sql = "SET SESSION TRANSACTION ISOLATION LEVEL ?"
+            val statement = Statement.create(sql).bind(0, NoQuotingString(level.value))
+            return execute(statement.render(), lock).map { }.also { _transactionIsolationLevel = level }
+        }
+
+        override suspend fun setTransactionIsolationLevel(level: IsolationLevel): Result<Unit> =
+            setTransactionIsolationLevel(level, true)
+
+        private suspend fun internalExecute(sql: String, lock: Boolean): Result<Long> {
+            suspend fun doExecute(sql: String): Result<Long> = runCatching {
                 sqlx { c -> sqlx4k_cn_query(rt, cn, sql, c, DriverNativeUtils.fn) }.use {
                     it.throwIfError()
                     it.rows_affected.toLong()
                 }
             }
+
+            suspend fun doExecuteWithLock(sql: String): Result<Long> = runCatching {
+                mutex.withLock {
+                    assertIsOpen()
+                    return doExecute(sql)
+                }
+            }
+
+            return if (lock) doExecuteWithLock(sql) else doExecute(sql)
         }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
+        override suspend fun execute(sql: String): Result<Long> = execute(sql, true)
 
         override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
@@ -155,30 +172,25 @@ class MySQL(
         override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
             fetchAll(statement.render(encoders))
 
+        override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
+            fetchAll(statement.render(encoders), rowMapper)
 
         override suspend fun internalBegin(): Result<Transaction> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 sqlx { c -> sqlx4k_cn_tx_begin(rt, cn, c, DriverNativeUtils.fn) }.use {
                     it.throwIfError()
-                    Tx(rt, it.tx!!, hook)
+                    Tx(rt, it.tx!!, encoders, hook)
                 }
             }
         }
     }
 
-    /**
-     * Implementation of the `Transaction` interface that provides methods to manage
-     * and execute transactional operations using SQL commands. Transactions are
-     * synchronized using a `Mutex` to maintain thread safety.
-     *
-     * @constructor Initializes the transaction implementation with the provided transaction pointer.
-     * @property tx The transaction pointer representing the current state and context of the transaction.
-     */
     class Tx(
         private val rt: CPointer<out CPointed>,
         private var tx: CPointer<out CPointed>,
-        parentHook: MutableHookEventBus,
+        override val encoders: Statement.ValueEncoderRegistry,
+        parentHook: MutableHookEventBus
     ) : TxBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
@@ -211,9 +223,6 @@ class MySQL(
             }
         }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
-
         override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
@@ -223,20 +232,5 @@ class MySQL(
                 }.toResult()
             }
         }
-
-        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-            fetchAll(statement.render(encoders))
-    }
-
-    companion object {
-        /**
-         * The `ValueEncoderRegistry` instance used for encoding values supplied to SQL statements in the `MySQL` class.
-         * This registry maps data types to their corresponding encoders, which convert values into a format suitable for
-         * inclusion in SQL queries.
-         *
-         * This registry is used in methods like `execute`, `fetchAll`, and other database operation methods to ensure
-         * that parameters bound to SQL statements are correctly encoded before being executed.
-         */
-        val encoders = Statement.ValueEncoderRegistry()
     }
 }

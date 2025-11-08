@@ -17,6 +17,7 @@ class PooledConnection(
     private val connection: Connection,
     private val pool: ConnectionPoolImpl,
 ) : Connection {
+    override val encoders: Statement.ValueEncoderRegistry = pool.encoders
     private val mutex = Mutex()
     private var acquired = true
     private val released get() = !acquired
@@ -24,6 +25,7 @@ class PooledConnection(
     private var lastUsedAt: TimeMark = createdAt
 
     override var status: Connection.Status = Connection.Status.Open
+    override val transactionIsolationLevel: Transaction.IsolationLevel? get() = connection.transactionIsolationLevel
 
     fun isReleased(): Boolean = released
 
@@ -117,9 +119,6 @@ class PooledConnection(
         }
     }
 
-    override suspend fun execute(statement: Statement): Result<Long> =
-        execute(statement.render(connection.encoders()))
-
     override suspend fun fetchAll(sql: String): Result<ResultSet> = runCatching {
         return mutex.withLock {
             assertIsOpen()
@@ -127,15 +126,15 @@ class PooledConnection(
         }
     }
 
-    override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-        fetchAll(statement.render(connection.encoders()))
-
     override suspend fun begin(): Result<Transaction> = runCatching {
         mutex.withLock {
             assertIsOpen()
             return connection.begin()
         }
     }
+
+    override suspend fun setTransactionIsolationLevel(level: Transaction.IsolationLevel): Result<Unit> =
+        connection.setTransactionIsolationLevel(level)
 
     override val hook: HookEventBus
         get() = connection.hook

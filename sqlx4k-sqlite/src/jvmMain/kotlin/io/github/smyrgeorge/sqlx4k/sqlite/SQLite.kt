@@ -32,12 +32,14 @@ import java.sql.ResultSet as JdbcResultSet
  *
  * @param url The URL of the SQLite database to connect to.
  * @param options Optional pool configuration, defaulting to `ConnectionPool.Options`.
+ * @param encoders Optional registry of value encoders to use for encoding query parameters.
  */
 class SQLite(
     url: String,
     options: ConnectionPool.Options = ConnectionPool.Options(),
+    override val encoders: Statement.ValueEncoderRegistry = Statement.ValueEncoderRegistry()
 ) : ISQLite, DriverBase() {
-    private val pool: ConnectionPoolImpl = createConnectionPool(url, options, hook)
+    private val pool: ConnectionPoolImpl = createConnectionPool(url, options, encoders)
 
     override suspend fun migrate(
         path: String,
@@ -75,9 +77,6 @@ class SQLite(
         }
     }
 
-    override suspend fun execute(statement: Statement): Result<Long> =
-        execute(statement.render(encoders))
-
     override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
         val connection = pool.acquire().getOrThrow()
         try {
@@ -89,10 +88,7 @@ class SQLite(
         }
     }
 
-    override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-        fetchAll(statement.render(encoders))
-
-    override suspend fun internalBegin(): Result<Transaction> = runCatching {
+    override suspend fun begin(): Result<Transaction> = runCatching {
         val connection = pool.acquire().getOrThrow() as PooledConnection
         try {
             val tx = connection.begin().getOrThrow()
@@ -104,25 +100,15 @@ class SQLite(
         }
     }
 
-    /**
-     * A concrete implementation of the `Connection` interface that manages a single JDBC connection
-     * while ensuring thread-safety and proper lifecycle handling.
-     *
-     * This class wraps a JDBC `Connection` and provides methods for executing queries, managing transactions,
-     * and fetching results. It uses a mutex to synchronize operations and ensures the connection is in the
-     * correct state before performing any operations. It tracks the connection's status internally and supports
-     * releasing resources appropriately.
-     *
-     * @constructor Creates an instance of `Cn` with the specified JDBC `Connection`.
-     * @property connection The underlying JDBC `Connection` used for executing database queries and transactions.
-     */
     class Cn(
         private val connection: JdbcConnection,
+        override val encoders: Statement.ValueEncoderRegistry
         parentHook: MutableHookEventBus,
     ) : CnBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
+        override val transactionIsolationLevel: IsolationLevel? = null
 
         override suspend fun internalClose(): Result<Unit> = runCatching {
             mutex.withLock {
@@ -132,6 +118,11 @@ class SQLite(
                     connection.close()
                 }
             }
+        }
+
+        override suspend fun setTransactionIsolationLevel(level: IsolationLevel): Result<Unit> {
+            // SQLite does not support setting the transaction isolation level.
+            return Result.success(Unit)
         }
 
         override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
@@ -146,9 +137,6 @@ class SQLite(
             }
         }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
-
         override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
@@ -161,9 +149,6 @@ class SQLite(
             }
         }
 
-        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-            fetchAll(statement.render(encoders))
-
         override suspend fun internalBegin(): Result<Transaction> = runCatching {
             mutex.withLock {
                 assertIsOpen()
@@ -173,29 +158,17 @@ class SQLite(
                     } catch (e: Exception) {
                         SQLError(SQLError.Code.Database, e.message).ex()
                     }
-                    Tx(connection, false, hook)
+                    Tx(connection, false, encoders, hook)
                 }
             }
         }
-
-        override fun encoders(): Statement.ValueEncoderRegistry = encoders
     }
 
-    /**
-     * Represents a database transaction that uses a JDBC connection for transactional operations.
-     *
-     * This class implements the [Transaction] interface and provides functionality to manage the lifecycle
-     * of a transaction, including committing, rolling back, and executing SQL statements. It ensures thread-safety
-     * and consistency using a coroutine-based mutex to synchronize operations on the transaction.
-     *
-     * @constructor Creates a new transaction instance with a specific JDBC connection.
-     * @param connection The JDBC connection used for the transaction.
-     * @param closeConnectionAfterTx Indicates whether the connection should be closed after the transaction is finalized.
-     */
     class Tx(
         private var connection: JdbcConnection,
         private val closeConnectionAfterTx: Boolean,
-        parentHook: MutableHookEventBus,
+        override val encoders: Statement.ValueEncoderRegistry,
+        parentHook: MutableHookEventBus
     ) : TxBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
@@ -247,9 +220,6 @@ class SQLite(
             }
         }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
-
         override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
@@ -262,22 +232,9 @@ class SQLite(
             }
         }
 
-        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-            fetchAll(statement.render(encoders))
-
     }
 
     companion object {
-        /**
-         * The `ValueEncoderRegistry` instance used for encoding values supplied to SQL statements in the `SQLite` class.
-         * This registry maps data types to their corresponding encoders, which convert values into a format suitable for
-         * inclusion in SQL queries.
-         *
-         * This registry is used in methods like `execute`, `fetchAll`, and other database operation methods to ensure
-         * that parameters bound to SQL statements are correctly encoded before being executed.
-         */
-        val encoders = Statement.ValueEncoderRegistry()
-
         private fun JdbcResultSet.toResultSet(): ResultSet {
             fun toRow(): ResultSet.Row {
                 val metaData = this.metaData
@@ -305,7 +262,8 @@ class SQLite(
         private fun createConnectionPool(
             url: String,
             options: ConnectionPool.Options,
-            parentHook: MutableHookEventBus
+            parentHook: MutableHookEventBus,
+            encoders: Statement.ValueEncoderRegistry
         ): ConnectionPoolImpl {
             // Ensure the URL has the proper JDBC prefix
             val jdbcUrl = "jdbc:sqlite:${url.removePrefix("jdbc:").removePrefix("sqlite:").removePrefix("//")}"
@@ -325,7 +283,7 @@ class SQLite(
                 withContext(Dispatchers.IO) {
                     val connection = DriverManager.getConnection(jdbcUrl)
                     connection.autoCommit = true
-                    Cn(connection, parentHook).apply {
+                    Cn(connection, encoders, parentHook).apply {
                         // Enable WAL mode for file-based databases to improve concurrency
                         // In-memory databases don't support WAL mode
                         if (!isInMemory) {
@@ -334,7 +292,7 @@ class SQLite(
                     }
                 }
             }
-            return ConnectionPoolImpl(options, null, connectionFactory)
+            return ConnectionPoolImpl(options, encoders, null, connectionFactory)
         }
     }
 }

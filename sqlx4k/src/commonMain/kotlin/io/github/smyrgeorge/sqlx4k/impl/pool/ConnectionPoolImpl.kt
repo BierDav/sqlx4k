@@ -5,6 +5,7 @@ package io.github.smyrgeorge.sqlx4k.impl.pool
 import io.github.smyrgeorge.sqlx4k.Connection
 import io.github.smyrgeorge.sqlx4k.ConnectionPool
 import io.github.smyrgeorge.sqlx4k.SQLError
+import io.github.smyrgeorge.sqlx4k.Statement
 import io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus
 import io.github.smyrgeorge.sqlx4k.impl.logging.Logger
 import kotlinx.coroutines.*
@@ -29,11 +30,13 @@ import kotlin.time.Duration.Companion.seconds
  * factory.
  *
  * @param options Configuration options for the connection pool such as max and min connections.
+ * @param encoders Optional registry of value encoders to use for encoding query parameters.
  * @param log Optional logger to record connection pool activities and errors.
  * @param connectionFactory Factory function to create new connections on demand.
  */
 class ConnectionPoolImpl(
     val options: ConnectionPool.Options,
+    val encoders: Statement.ValueEncoderRegistry,
     private val log: Logger? = null,
     private val connectionFactory: ConnectionFactory,
 ) : ConnectionPool {

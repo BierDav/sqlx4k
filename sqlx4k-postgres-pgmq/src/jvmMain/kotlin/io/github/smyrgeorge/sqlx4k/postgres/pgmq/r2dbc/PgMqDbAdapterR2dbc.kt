@@ -1,9 +1,10 @@
 package io.github.smyrgeorge.sqlx4k.postgres.pgmq.r2dbc
 
-import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.ResultSet
+import io.github.smyrgeorge.sqlx4k.Statement
+import io.github.smyrgeorge.sqlx4k.Transaction
 import io.github.smyrgeorge.sqlx4k.impl.metadata.MetadataStorage
-import io.github.smyrgeorge.sqlx4k.postgres.IPostgresNotifications
+import io.github.smyrgeorge.sqlx4k.postgres.Notification
 import io.github.smyrgeorge.sqlx4k.postgres.PostgreSQLImpl
 import io.github.smyrgeorge.sqlx4k.postgres.pgmq.PgMqDbAdapter
 import io.r2dbc.pool.ConnectionPool
@@ -22,14 +23,14 @@ import io.r2dbc.postgresql.PostgresqlConnectionFactory
  */
 class PgMqDbAdapterR2dbc(
     private val connectionFactory: PostgresqlConnectionFactory,
-    pool: ConnectionPool,
-    private val adapter: PostgreSQLImpl = PostgreSQLImpl(connectionFactory, pool),
-) : PgMqDbAdapter,
-    QueryExecutor.Transactional by adapter,
-    IPostgresNotifications by adapter {
+    pool: ConnectionPool
+) : PgMqDbAdapter {
+    override val encoders: Statement.ValueEncoderRegistry = Statement.ValueEncoderRegistry.EMPTY
+    private val adapter = PostgreSQLImpl(pool, connectionFactory, encoders)
     override val metadata: MetadataStorage = adapter.metadata
 
+    override suspend fun listen(channel: String, f: suspend (Notification) -> Unit) = adapter.listen(channel, f)
+    override suspend fun begin(): Result<Transaction> = adapter.begin()
     override suspend fun execute(sql: String): Result<Long> = adapter.execute(sql)
-
     override suspend fun fetchAll(sql: String): Result<ResultSet> = adapter.fetchAll(sql)
 }

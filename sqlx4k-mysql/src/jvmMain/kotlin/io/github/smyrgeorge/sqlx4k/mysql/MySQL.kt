@@ -9,10 +9,12 @@ import io.asyncer.r2dbc.mysql.codec.CodecContext
 import io.asyncer.r2dbc.mysql.codec.CodecRegistry
 import io.asyncer.r2dbc.mysql.extension.CodecRegistrar
 import io.github.smyrgeorge.sqlx4k.*
+import io.github.smyrgeorge.sqlx4k.Transaction.IsolationLevel
 import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
 import io.github.smyrgeorge.sqlx4k.impl.hook.*
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
+import io.github.smyrgeorge.sqlx4k.impl.types.NoQuotingString
 import io.netty.buffer.ByteBuf
 import io.netty.buffer.ByteBufAllocator
 import io.r2dbc.pool.ConnectionPoolConfiguration
@@ -49,12 +51,14 @@ import io.r2dbc.spi.Result as R2dbcResultSet
  * @param username The username for authenticating with the database.
  * @param password The password for authenticating with the database.
  * @param options The optional configuration for the connection pool, such as min/max connections and timeout settings.
+ * @param encoders Optional registry of value encoders to use for encoding query parameters.
  */
 class MySQL(
     url: String,
     username: String,
     password: String,
     options: ConnectionPool.Options = ConnectionPool.Options(),
+    override val encoders: Statement.ValueEncoderRegistry = Statement.ValueEncoderRegistry()
 ) : IMySQL, DriverBase() {
     private val connectionFactory: MySqlConnectionFactory = connectionFactory(url, username, password)
     private val poolConfiguration: ConnectionPoolConfiguration = connectionOptions(options, connectionFactory)
@@ -81,18 +85,18 @@ class MySQL(
     )
 
     override suspend fun internalClose(): Result<Unit> = runCatching {
-            try {
-                pool.disposeLater().awaitFirstOrNull()
-            } catch (e: Exception) {
-                SQLError(SQLError.Code.WorkerCrashed, e.message).ex()
-            }
+        try {
+            pool.disposeLater().awaitFirstOrNull()
+        } catch (e: Exception) {
+            SQLError(SQLError.Code.WorkerCrashed, e.message).ex()
         }
+    }
 
     override fun poolSize(): Int = pool.metrics.getOrElse { error("No metrics available.") }.allocatedSize()
     override fun poolIdleSize(): Int = pool.metrics.getOrElse { error("No metrics available.") }.idleSize()
 
     override suspend fun internalAcquire(): Result<Connection> = runCatching {
-        Cn(pool.acquire(), hook)
+        Cn(pool.acquire(), encoders, hook)
     }
 
     override suspend fun internalExecute(sql: String) = runCatching {
@@ -109,9 +113,6 @@ class MySQL(
         }
     }
 
-    override suspend fun execute(statement: Statement): Result<Long> =
-        execute(statement.render(encoders))
-
     override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
         @Suppress("SqlSourceToSinkFlow")
         with(pool.acquire()) {
@@ -126,9 +127,6 @@ class MySQL(
         }
     }
 
-    override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-        fetchAll(statement.render(encoders))
-
     override suspend fun internalBegin(): Result<Transaction> = runCatching {
         with(pool.acquire()) {
             try {
@@ -137,7 +135,7 @@ class MySQL(
                 close().awaitFirstOrNull()
                 SQLError(SQLError.Code.Database, e.message).ex()
             }
-            Tx(this, true, hook)
+            Tx(this, true, encoders, hook)
         }
     }
 
@@ -153,56 +151,68 @@ class MySQL(
         }
     }
 
-    /**
-     * A concrete implementation of the `Connection` interface that manages a single database connection
-     * while ensuring thread-safety and proper lifecycle handling.
-     *
-     * This class wraps an `R2dbcConnection` and provides methods for executing queries, managing transactions,
-     * and fetching results. It uses a mutex to synchronize operations and ensures the connection is in the
-     * correct state before performing any operations. It tracks the connection's status internally and supports
-     * releasing resources appropriately.
-     *
-     * @constructor Creates an instance of `Cn` with the specified `R2dbcConnection`.
-     * @property connection The underlying `R2dbcConnection` used for executing database queries and transactions.
-     */
     class Cn(
         private val connection: R2dbcConnection,
+        override val encoders: Statement.ValueEncoderRegistry,
         parentEventBus: MutableHookEventBus,
     ) : CnBase(parentEventBus) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
+        private var _transactionIsolationLevel: IsolationLevel? = null
+        override val transactionIsolationLevel: IsolationLevel? get() = _transactionIsolationLevel
 
 
         override suspend fun internalClose(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Connection.Status.Closed
+
+                transactionIsolationLevel?.let {
+                    val default = IMySQL.DEFAULT_TRANSACTION_ISOLATION_LEVEL
+                    setTransactionIsolationLevel(default, false)
+                }
+
                 connection.close().awaitFirstOrNull()
             }
         }
 
-        override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
+        private suspend fun setTransactionIsolationLevel(level: IsolationLevel, lock: Boolean): Result<Unit> {
+            // language=SQL
+            val sql = "SET SESSION TRANSACTION ISOLATION LEVEL ?"
+            val statement = Statement.create(sql).bind(0, NoQuotingString(level.value))
+            return execute(statement.render(), lock).map { }.also { _transactionIsolationLevel = level }
+        }
+
+        override suspend fun setTransactionIsolationLevel(level: IsolationLevel): Result<Unit> =
+            setTransactionIsolationLevel(level, true)
+
+        private suspend fun execute(sql: String, lock: Boolean): Result<Long> {
+            suspend fun doExecute(sql: String): Result<Long> = runCatching {
+                connection.createStatement(sql).execute().awaitSingle().rowsUpdated.awaitFirstOrNull() ?: 0
+            }
+
+            suspend fun doExecuteWithLock(sql: String): Result<Long> = runCatching {
                 mutex.withLock {
                     assertIsOpen()
-                    @Suppress("SqlSourceToSinkFlow")
-                    connection.createStatement(sql).execute().awaitSingle().rowsUpdated.awaitFirstOrNull() ?: 0
+                    return doExecute(sql)
                 }
             }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
+            return if (lock) doExecuteWithLock(sql) else doExecute(sql)
+        }
 
-        override suspend fun internalFetchAll(sql: String): Result<ResultSet>  = runCatching {
-                mutex.withLock {
-                    assertIsOpen()
-                    @Suppress("SqlSourceToSinkFlow")
-                    connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult().getOrThrow()
-                }
+
+        override suspend fun internalExecute(sql: String): Result<Long> = execute(sql, true)
+
+
+        override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
+            mutex.withLock {
+                assertIsOpen()
+                @Suppress("SqlSourceToSinkFlow")
+                connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult().getOrThrow()
             }
-
-        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-            fetchAll(statement.render(encoders))
+        }
 
         override suspend fun internalBegin(): Result<Transaction> = runCatching {
             mutex.withLock {
@@ -212,28 +222,17 @@ class MySQL(
                 } catch (e: Exception) {
                     SQLError(SQLError.Code.Database, e.message).ex()
                 }
-                Tx(connection, false, hook)
+                Tx(connection, false, encoders, hook)
             }
         }
     }
 
-    /**
-     * Represents a transaction implementation that provides functionality for managing
-     * and executing operations within a transactional context.
-     *
-     * @property connection The underlying R2DBC connection used to execute the transaction.
-     * @property closeConnectionAfterTx Indicates whether the connection should be closed after the transaction is completed.
-     *
-     * This class uses a [Mutex] to ensure thread-safety for the transaction's operations.
-     * It includes methods for committing, rolling back, and executing queries within
-     * the scope of the transaction.
-     */
     class Tx(
         private var connection: R2dbcConnection,
         private val closeConnectionAfterTx: Boolean,
+        override val encoders: Statement.ValueEncoderRegistry,
         parentHook: MutableHookEventBus,
     ) : TxBase(parentHook) {
-
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
         override val status: Transaction.Status get() = _status
@@ -274,9 +273,6 @@ class MySQL(
             }
         }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
-
         override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             mutex.withLock {
                 assertIsOpen()
@@ -284,22 +280,9 @@ class MySQL(
                 connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult().getOrThrow()
             }
         }
-
-        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-            fetchAll(statement.render(encoders))
     }
 
     companion object {
-        /**
-         * The `ValueEncoderRegistry` instance used for encoding values supplied to SQL statements in the `PostgreSQL` class.
-         * This registry maps data types to their corresponding encoders, which convert values into a format suitable for
-         * inclusion in SQL queries.
-         *
-         * This registry is used in methods like `execute`, `fetchAll`, and other database operation methods to ensure
-         * that parameters bound to SQL statements are correctly encoded before being executed.
-         */
-        val encoders = Statement.ValueEncoderRegistry()
-
         private fun connectionFactory(url: String, username: String, password: String): MySqlConnectionFactory {
             val url = URI(url)
             return MySqlConnectionFactory.from(

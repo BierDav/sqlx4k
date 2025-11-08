@@ -10,7 +10,6 @@ kotlin {
         optIn.add("kotlin.concurrent.atomics.ExperimentalAtomicApi")
     }
 
-    @Suppress("unused")
     sourceSets {
         all {
             languageSettings.enableLanguageFeature("NestedTypeAliases")
@@ -19,15 +18,14 @@ kotlin {
         configureEach {
             languageSettings.progressiveMode = true
         }
-        val commonMain by getting {
+        commonMain {
             dependencies {
-                api("co.touchlab:stately-concurrent-collections:2.0.0")
                 api(libs.kotlinx.coroutines.core)
                 api(libs.kotlinx.datetime)
-                api(libs.kotlinx.io.core)
+                implementation(libs.kotlinx.io.core)
             }
         }
-        val commonTest by getting {
+        commonTest {
             dependencies {
                 implementation(libs.kotlin.test)
                 implementation(libs.assertk)

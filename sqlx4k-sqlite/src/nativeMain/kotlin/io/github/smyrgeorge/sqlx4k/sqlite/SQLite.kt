@@ -2,6 +2,7 @@ package io.github.smyrgeorge.sqlx4k.sqlite
 
 import io.github.smyrgeorge.sqlx4k.*
 import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
+import io.github.smyrgeorge.sqlx4k.Transaction.IsolationLevel
 import io.github.smyrgeorge.sqlx4k.impl.extensions.*
 import io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
@@ -28,11 +29,13 @@ import kotlin.time.Duration
  * @param url The URL string for connecting to the SQLite database.
  * @param options Configuration options for the connection pool, such as minimum and
  * maximum connections, timeout durations, etc.
+ * @param encoders Optional registry of value encoders to use for encoding query parameters.
  */
 @OptIn(ExperimentalForeignApi::class)
 class SQLite(
     url: String,
     options: ConnectionPool.Options = ConnectionPool.Options(),
+    override val encoders: Statement.ValueEncoderRegistry = Statement.ValueEncoderRegistry()
 ) : ISQLite, DriverBase() {
     private val rt: CPointer<out CPointed> = sqlx4k_of(
         url = url,
@@ -73,7 +76,7 @@ class SQLite(
     override suspend fun internalAcquire(): Result<Connection> = runCatching {
         sqlx { c -> sqlx4k_cn_acquire(rt, c, DriverNativeUtils.fn) }.use {
             it.throwIfError()
-            Cn(rt, it.cn!!, hook)
+            Cn(rt, it.cn!!, encoders, hook)
         }
     }
 
@@ -81,47 +84,28 @@ class SQLite(
         sqlx { c -> sqlx4k_query(rt, sql, c, DriverNativeUtils.fn) }.rowsAffectedOrError()
     }
 
-    override suspend fun execute(statement: Statement): Result<Long> =
-        execute(statement.render(encoders))
-
     override suspend fun internalFetchAll(sql: String): Result<ResultSet> {
         val res = sqlx { c -> sqlx4k_fetch_all(rt, sql, c, DriverNativeUtils.fn) }
         return res.use { it.toResultSet() }.toResult()
     }
 
-    override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-        fetchAll(statement.render(encoders))
-
-    override suspend fun <T> fetchAll(statement: Statement, rowMapper: RowMapper<T>): Result<List<T>> =
-        fetchAll(statement.render(encoders), rowMapper)
-
     override suspend fun internalBegin(): Result<Transaction> = runCatching {
         sqlx { c -> sqlx4k_tx_begin(rt, c, DriverNativeUtils.fn) }.use {
             it.throwIfError()
-            Tx(rt, it.tx!!, hook)
+            Tx(rt, it.tx!!)
         }
     }
 
-    /**
-     * Represents a native database connection that implements the `Connection` interface.
-     *
-     * This class encapsulates a low-level, pointer-based interface to interact directly with
-     * a database connection and provides methods for executing queries, transactions, and managing
-     * the connection lifecycle.
-     *
-     * @constructor Creates a new instance of the `Cn` class.
-     * @property rt A `CPointer` representing the runtime context for the connection.
-     *              This pointer is required for any database operations performed through this connection.
-     * @property cn A `CPointer` representing the native connection object.
-     */
     class Cn(
         private val rt: CPointer<out CPointed>,
         private val cn: CPointer<out CPointed>,
-        parentHook: MutableHookEventBus,
+        override val encoders: Statement.ValueEncoderRegistry
+        parentHook: MutableHookEventBus
     ) : CnBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
+        override val transactionIsolationLevel: IsolationLevel? = null
 
         override suspend fun internalClose(): Result<Unit> = runCatching {
             mutex.withLock {
@@ -129,6 +113,11 @@ class SQLite(
                 _status = Connection.Status.Closed
                 sqlx { c -> sqlx4k_cn_release(rt, cn, c, DriverNativeUtils.fn) }.throwIfError()
             }
+        }
+
+        override suspend fun setTransactionIsolationLevel(level: IsolationLevel): Result<Unit> {
+            // SQLite does not support setting the transaction isolation level.
+            return Result.success(Unit)
         }
 
         override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
@@ -141,9 +130,6 @@ class SQLite(
             }
         }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
-
         override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
@@ -153,41 +139,23 @@ class SQLite(
             }
         }
 
-        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-            fetchAll(statement.render(encoders))
-
-
         override suspend fun internalBegin(): Result<Transaction> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 sqlx { c -> sqlx4k_cn_tx_begin(rt, cn, c, DriverNativeUtils.fn) }.use {
                     it.throwIfError()
-                    Tx(rt, it.tx!!, hook)
+                    Tx(rt, it.tx!!, encoders, hook)
                 }
             }
         }
     }
 
-    /**
-     * Represents a specific implementation of the `Transaction` interface.
-     * This class facilitates the management of database transactions, including
-     * methods to commit, roll back, execute queries, and fetch results.
-     *
-     * Transactions in this class are thread-safe, ensuring consistent access
-     * to transaction operations through the usage of a [Mutex].
-     *
-     * This implementation ensures that transactional queries and operations
-     * are properly committed or rolled back, and verifies the transactional
-     * state before allowing execution.
-     *
-     * @constructor Creates an instance of the `Tx` class with the given transaction pointer.
-     * @param tx A pointer to the transaction object in memory used for transactional operations.
-     */
     class Tx(
         private val rt: CPointer<out CPointed>,
         private var tx: CPointer<out CPointed>,
-        parentHook: MutableHookEventBus,
-    ) : TxBase(parentHook) {
+        override val encoders: Statement.ValueEncoderRegistry,
+        parentHook: MutableHookEventBus
+    ) : Transaction {
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
         override val status: Transaction.Status get() = _status
@@ -219,9 +187,6 @@ class SQLite(
             }
         }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
-
         override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
@@ -231,20 +196,5 @@ class SQLite(
                 }.toResult()
             }
         }
-
-        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-            fetchAll(statement.render(encoders))
-    }
-
-    companion object {
-        /**
-         * The `ValueEncoderRegistry` instance used for encoding values supplied to SQL statements in the `SQLite` class.
-         * This registry maps data types to their corresponding encoders, which convert values into a format suitable for
-         * inclusion in SQL queries.
-         *
-         * This registry is used in methods like `execute`, `fetchAll`, and other database operation methods to ensure
-         * that parameters bound to SQL statements are correctly encoded before being executed.
-         */
-        val encoders = Statement.ValueEncoderRegistry()
     }
 }

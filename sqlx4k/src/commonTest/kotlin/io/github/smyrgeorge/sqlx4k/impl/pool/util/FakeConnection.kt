@@ -1,12 +1,16 @@
 package io.github.smyrgeorge.sqlx4k.impl.pool.util
 
-import io.github.smyrgeorge.sqlx4k.*
-import io.github.smyrgeorge.sqlx4k.impl.invalidation.TrackOnlyTableInvalidationScope
-import io.github.smyrgeorge.sqlx4k.impl.invalidation.TransactionTableInvalidationScope
+import io.github.smyrgeorge.sqlx4k.Connection
+import io.github.smyrgeorge.sqlx4k.ResultSet
+import io.github.smyrgeorge.sqlx4k.Statement
+import io.github.smyrgeorge.sqlx4k.Transaction
+import io.github.smyrgeorge.sqlx4k.impl.hook.HookEventBus
+import io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus
+import io.github.smyrgeorge.sqlx4k.impl.metadata.MetadataStorage
 
 class FakeConnection(val id: Long) : Connection {
-    override val invalidationScope = TrackOnlyTableInvalidationScope()
     override var status: Connection.Status = Connection.Status.Open
+    override var transactionIsolationLevel: Transaction.IsolationLevel? = null
     var onClose: (() -> Unit)? = null
     private var closed = false
     private var releases = 0
@@ -29,14 +33,23 @@ class FakeConnection(val id: Long) : Connection {
         return Result.success(FakeTransaction())
     }
 
+    override val metadata: MetadataStorage = MetadataStorage()
+    override val hook: HookEventBus = MutableHookEventBus()
+
+    override val encoders: Statement.ValueEncoderRegistry = Statement.ValueEncoderRegistry.EMPTY
+
     override suspend fun execute(sql: String): Result<Long> {
         return if (sql == "id") Result.success(id) else Result.success(++executes)
     }
 
-    override suspend fun execute(statement: Statement): Result<Long> = Result.success(++executes)
     override suspend fun fetchAll(sql: String): Result<ResultSet> =
         Result.success(ResultSet(emptyList(), null, ResultSet.Metadata(emptyList())))
 
     override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
         Result.success(ResultSet(emptyList(), null, ResultSet.Metadata(emptyList())))
+
+    override suspend fun setTransactionIsolationLevel(level: Transaction.IsolationLevel): Result<Unit> {
+        transactionIsolationLevel = level
+        return Result.success(Unit)
+    }
 }

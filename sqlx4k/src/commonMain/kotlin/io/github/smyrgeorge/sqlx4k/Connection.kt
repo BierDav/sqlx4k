@@ -15,6 +15,7 @@ import io.github.smyrgeorge.sqlx4k.impl.hook.HookEvent
 interface Connection : QueryExecutor, QueryExecutor.Transactional, HookApi {
 
     val status: Status
+    val transactionIsolationLevel: Transaction.IsolationLevel?
 
     /**
      * Ensures that the connection is currently in an open state.
@@ -43,13 +44,20 @@ interface Connection : QueryExecutor, QueryExecutor.Transactional, HookApi {
     suspend fun close(): Result<Unit>
 
     /**
-     * Retrieves the `ValueEncoderRegistry` associated with the current connection.
-     * The `ValueEncoderRegistry` provides access to registered value encoders, which
-     * are responsible for converting types into formats suitable for use in SQL statements.
+     * Sets the transaction isolation level for the current connection.
      *
-     * @return A `ValueEncoderRegistry` instance that manages the encoders for this connection.
+     * This method configures the isolation level at which database transactions
+     * are executed within the current connection. The isolation level controls
+     * the degree to which changes made by one transaction are visible to other
+     * concurrent transactions, helping to balance data consistency and performance.
+     *
+     * @param level The [Transaction.IsolationLevel] to be set for the current connection.
+     *              Options include Default, ReadUncommitted, ReadCommitted,
+     *              RepeatableRead, and Serializable.
+     * @return A [Result] containing [Unit] if the isolation level was successfully set,
+     *         or an error if the operation failed.
      */
-    fun encoders(): Statement.ValueEncoderRegistry = Statement.ValueEncoderRegistry.EMPTY
+    suspend fun setTransactionIsolationLevel(level: Transaction.IsolationLevel): Result<Unit>
 
     /**
      * Represents the operational state of a connection.

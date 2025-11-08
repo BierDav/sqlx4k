@@ -1,11 +1,13 @@
 package io.github.smyrgeorge.sqlx4k.postgres
 
 import io.github.smyrgeorge.sqlx4k.*
+import io.github.smyrgeorge.sqlx4k.Transaction.IsolationLevel
 import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
 import io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
 import io.github.smyrgeorge.sqlx4k.impl.types.DoubleQuotingString
+import io.github.smyrgeorge.sqlx4k.impl.types.NoQuotingString
 import io.r2dbc.postgresql.PostgresqlConnectionFactory
 import io.r2dbc.spi.Row
 import kotlinx.coroutines.CoroutineScope
@@ -30,8 +32,9 @@ import io.r2dbc.spi.Connection as R2dbcConnection
 import io.r2dbc.spi.Result as R2dbcResultSet
 
 class PostgreSQLImpl(
-    private val connectionFactory: PostgresqlConnectionFactory,
     private val pool: R2dbcConnectionPool,
+    private val connectionFactory: PostgresqlConnectionFactory,
+    override val encoders: Statement.ValueEncoderRegistry = Statement.ValueEncoderRegistry()
 ) : IPostgresSQL, DriverBase() {
     override suspend fun migrate(
         path: String,
@@ -63,7 +66,7 @@ class PostgreSQLImpl(
     override fun poolIdleSize(): Int = pool.metrics.getOrElse { error("No metrics available.") }.idleSize()
 
     override suspend fun internalAcquire(): Result<Connection> = runCatching {
-        Cn(pool.acquire(), hook)
+        Cn(pool.acquire(), encoders, hook)
     }
 
     override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
@@ -80,9 +83,6 @@ class PostgreSQLImpl(
         }
     }
 
-    override suspend fun execute(statement: Statement): Result<Long> =
-        execute(statement.render(encoders))
-
     override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
         @Suppress("SqlSourceToSinkFlow")
         with(pool.acquire()) {
@@ -97,9 +97,6 @@ class PostgreSQLImpl(
         }
     }
 
-    override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-        fetchAll(statement.render(encoders))
-
     override suspend fun internalBegin(): Result<Transaction> = runCatching {
         with(pool.acquire()) {
             try {
@@ -108,7 +105,7 @@ class PostgreSQLImpl(
                 close().awaitFirstOrNull()
                 SQLError(SQLError.Code.Database, e.message).ex()
             }
-            Tx(this, true, hook)
+            Tx(this, true, encoders, hook)
         }
     }
 
@@ -211,34 +208,56 @@ class PostgreSQLImpl(
         }
     }
 
-    /**
-     * A concrete implementation of the `Connection` interface that manages a single database connection
-     * while ensuring thread-safety and proper lifecycle handling.
-     *
-     * This class wraps an `R2dbcConnection` and provides methods for executing queries, managing transactions,
-     * and fetching results. It uses a mutex to synchronize operations and ensures the connection is in the
-     * correct state before performing any operations. It tracks the connection's status internally and supports
-     * releasing resources appropriately.
-     *
-     * @constructor Creates an instance of `Cn` with the specified `R2dbcConnection`.
-     * @property connection The underlying `R2dbcConnection` used for executing database queries and transactions.
-     */
     class Cn(
         private val connection: R2dbcConnection,
+        override val encoders: Statement.ValueEncoderRegistry,
         parentHook: MutableHookEventBus,
     ) : CnBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Connection.Status = Connection.Status.Open
         override val status: Connection.Status get() = _status
+        private var _transactionIsolationLevel: IsolationLevel? = null
+        override val transactionIsolationLevel: IsolationLevel? get() = _transactionIsolationLevel
 
         override suspend fun internalClose(): Result<Unit> = runCatching {
             mutex.withLock {
                 assertIsOpen()
                 _status = Connection.Status.Closed
+
+                transactionIsolationLevel?.let {
+                    val default = IPostgresSQL.DEFAULT_TRANSACTION_ISOLATION_LEVEL
+                    setTransactionIsolationLevel(default, false)
+                }
+
                 connection.close().awaitFirstOrNull()
             }
         }
 
+        private suspend fun setTransactionIsolationLevel(level: IsolationLevel, lock: Boolean): Result<Unit> {
+            // language=SQL
+            val sql = "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL ?"
+            val statement = Statement.create(sql).bind(0, NoQuotingString(level.value))
+            return execute(statement.render(), lock).map { }.also { _transactionIsolationLevel = level }
+        }
+
+        override suspend fun setTransactionIsolationLevel(level: IsolationLevel): Result<Unit> =
+            setTransactionIsolationLevel(level, true)
+
+
+        private suspend fun execute(sql: String, lock: Boolean): Result<Long> {
+            suspend fun doExecute(sql: String): Result<Long> = runCatching {
+                connection.createStatement(sql).execute().awaitSingle().rowsUpdated.awaitFirstOrNull() ?: 0
+            }
+
+            suspend fun doExecuteWithLock(sql: String): Result<Long> = runCatching {
+                mutex.withLock {
+                    assertIsOpen()
+                    return doExecute(sql)
+                }
+            }
+
+            return if (lock) doExecuteWithLock(sql) else doExecute(sql)
+        }
 
         override suspend fun internalExecute(sql: String): Result<Long> = runCatching {
             mutex.withLock {
@@ -248,8 +267,7 @@ class PostgreSQLImpl(
             }
         }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
+        override suspend fun execute(sql: String): Result<Long> = execute(sql, true)
 
         override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
@@ -259,9 +277,6 @@ class PostgreSQLImpl(
             }
         }
 
-        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-            fetchAll(statement.render(encoders))
-
         override suspend fun internalBegin(): Result<Transaction> = runCatching {
             mutex.withLock {
                 assertIsOpen()
@@ -270,26 +285,16 @@ class PostgreSQLImpl(
                 } catch (e: Exception) {
                     SQLError(SQLError.Code.Database, e.message).ex()
                 }
-                Tx(connection, false, hook)
+                Tx(connection, false, encoders, hook)
             }
         }
     }
 
-    /**
-     * Represents a database transaction that uses a reactive connection for transactional operations.
-     *
-     * This class implements the [Transaction] interface and provides functionality to manage the lifecycle
-     * of a transaction, including committing, rolling back, and executing SQL statements. It ensures thread-safety
-     * and consistency using a coroutine-based mutex to synchronize operations on the transaction.
-     *
-     * @constructor Creates a new transaction instance with a specific database connection.
-     * @param connection The reactive database connection used for the transaction.
-     * @param closeConnectionAfterTx Indicates whether the connection should be closed after the transaction is finalized.
-     */
     class Tx(
         private var connection: R2dbcConnection,
         private val closeConnectionAfterTx: Boolean,
-        parentHook: MutableHookEventBus,
+        override val encoders: Statement.ValueEncoderRegistry
+        parentHook: MutableHookEventBus
     ) : TxBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
@@ -331,9 +336,6 @@ class PostgreSQLImpl(
             }
         }
 
-        override suspend fun execute(statement: Statement): Result<Long> =
-            execute(statement.render(encoders))
-
         override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {
                 assertIsOpen()
@@ -341,23 +343,9 @@ class PostgreSQLImpl(
                 connection.createStatement(sql).execute().awaitSingle().toResultSet().toResult()
             }
         }
-
-        override suspend fun fetchAll(statement: Statement): Result<ResultSet> =
-            fetchAll(statement.render(encoders))
-
     }
 
     companion object {
-        /**
-         * The `ValueEncoderRegistry` instance used for encoding values supplied to SQL statements in the `PostgreSQL` class.
-         * This registry maps data types to their corresponding encoders, which convert values into a format suitable for
-         * inclusion in SQL queries.
-         *
-         * This registry is used in methods like `execute`, `fetchAll`, and other database operation methods to ensure
-         * that parameters bound to SQL statements are correctly encoded before being executed.
-         */
-        val encoders = Statement.ValueEncoderRegistry()
-
         private object PgChannelScope : CoroutineScope {
             override val coroutineContext: CoroutineContext
                 get() = EmptyCoroutineContext

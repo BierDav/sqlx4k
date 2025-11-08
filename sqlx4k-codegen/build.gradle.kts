@@ -5,7 +5,6 @@ plugins {
 }
 
 kotlin {
-    @Suppress("unused")
     sourceSets {
         all {
             languageSettings.enableLanguageFeature("NestedTypeAliases")
@@ -14,7 +13,7 @@ kotlin {
         configureEach {
             languageSettings.progressiveMode = true
         }
-        val jvmMain by getting {
+        jvmMain {
             dependencies {
                 api(project(":sqlx4k"))
                 implementation(libs.ksp)
