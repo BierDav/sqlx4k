@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import java.io.OutputStream
 import kotlin.reflect.KClass
 
+
 open class RepositoryProcessor(
     private val options: Map<String, String>,
     private val logger: KSPLogger,
@@ -839,7 +840,6 @@ open class RepositoryProcessor(
                            val statement = entity.delete()
                            val result = context.execute(statement).map { kotlin.Unit }
                            hook?.publish { CrudRepository.AfterDeleteHook(entity, listOf($dependentTablesArg), result, context) }
-                           hook?.publish { EventHook(listOf($dependentTablesArg), result, context, ) }
                            ${additionalAfterCrudHook(repo, "delete", dependentTablesArg, "entity")}
                            result
                        }

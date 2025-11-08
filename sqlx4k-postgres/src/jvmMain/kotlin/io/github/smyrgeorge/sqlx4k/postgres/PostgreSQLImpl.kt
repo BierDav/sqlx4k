@@ -293,7 +293,7 @@ class PostgreSQLImpl(
     class Tx(
         private var connection: R2dbcConnection,
         private val closeConnectionAfterTx: Boolean,
-        override val encoders: Statement.ValueEncoderRegistry
+        override val encoders: Statement.ValueEncoderRegistry,
         parentHook: MutableHookEventBus
     ) : TxBase(parentHook) {
         private val mutex = Mutex()

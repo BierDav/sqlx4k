@@ -3,9 +3,8 @@ package io.github.smyrgeorge.sqlx4k.postgres
 import io.github.smyrgeorge.sqlx4k.Driver
 import io.github.smyrgeorge.sqlx4k.Transaction
 
-interface IPostgresSQL : Driver, IPostgresNotifications
+interface IPostgresSQL : Driver {
 
-interface IPostgresNotifications {
     /**
      * Listens for notifications on a specified PostgreSQL channel and executes a callback for each received notification.
      *

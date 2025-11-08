@@ -108,6 +108,7 @@ class MySQL(
     class Cn(
         private val rt: CPointer<out CPointed>,
         private val cn: CPointer<out CPointed>,
+        override val encoders: Statement.ValueEncoderRegistry,
         parentHook: MutableHookEventBus,
     ) : CnBase(parentHook) {
         private val mutex = Mutex()
@@ -140,7 +141,7 @@ class MySQL(
         override suspend fun setTransactionIsolationLevel(level: IsolationLevel): Result<Unit> =
             setTransactionIsolationLevel(level, true)
 
-        private suspend fun internalExecute(sql: String, lock: Boolean): Result<Long> {
+        private suspend fun execute(sql: String, lock: Boolean): Result<Long> {
             suspend fun doExecute(sql: String): Result<Long> = runCatching {
                 sqlx { c -> sqlx4k_cn_query(rt, cn, sql, c, DriverNativeUtils.fn) }.use {
                     it.throwIfError()
@@ -158,7 +159,7 @@ class MySQL(
             return if (lock) doExecuteWithLock(sql) else doExecute(sql)
         }
 
-        override suspend fun execute(sql: String): Result<Long> = execute(sql, true)
+        override suspend fun internalExecute(sql: String): Result<Long> = execute(sql, true)
 
         override suspend fun internalFetchAll(sql: String): Result<ResultSet> = runCatching {
             return mutex.withLock {

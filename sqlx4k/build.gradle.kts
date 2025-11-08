@@ -23,6 +23,7 @@ kotlin {
                 api(libs.kotlinx.coroutines.core)
                 api(libs.kotlinx.datetime)
                 implementation(libs.kotlinx.io.core)
+                implementation(libs.stately.concurrency.collections)
             }
         }
         commonTest {

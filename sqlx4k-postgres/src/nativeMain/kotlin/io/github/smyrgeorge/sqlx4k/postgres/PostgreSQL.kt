@@ -222,7 +222,7 @@ class PostgreSQL(
         override suspend fun setTransactionIsolationLevel(level: IsolationLevel): Result<Unit> =
             setTransactionIsolationLevel(level, true)
 
-        private suspend fun internalExecute(sql: String, lock: Boolean): Result<Long> {
+        private suspend fun execute(sql: String, lock: Boolean): Result<Long> {
             suspend fun doExecute(sql: String): Result<Long> = runCatching {
                 sqlx { c -> sqlx4k_cn_query(rt, cn, sql, c, DriverNativeUtils.fn) }.use {
                     it.throwIfError()

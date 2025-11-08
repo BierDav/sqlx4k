@@ -2,6 +2,7 @@ package io.github.smyrgeorge.sqlx4k.sqlite
 
 import io.github.smyrgeorge.sqlx4k.*
 import io.github.smyrgeorge.sqlx4k.impl.driver.DriverBase
+import io.github.smyrgeorge.sqlx4k.Transaction.IsolationLevel
 import io.github.smyrgeorge.sqlx4k.impl.hook.MutableHookEventBus
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
@@ -39,7 +40,7 @@ class SQLite(
     options: ConnectionPool.Options = ConnectionPool.Options(),
     override val encoders: Statement.ValueEncoderRegistry = Statement.ValueEncoderRegistry()
 ) : ISQLite, DriverBase() {
-    private val pool: ConnectionPoolImpl = createConnectionPool(url, options, encoders)
+    private val pool: ConnectionPoolImpl = createConnectionPool(url, options, encoders, hook)
 
     override suspend fun migrate(
         path: String,
@@ -88,7 +89,7 @@ class SQLite(
         }
     }
 
-    override suspend fun begin(): Result<Transaction> = runCatching {
+    override suspend fun internalBegin(): Result<Transaction> = runCatching {
         val connection = pool.acquire().getOrThrow() as PooledConnection
         try {
             val tx = connection.begin().getOrThrow()
@@ -102,7 +103,7 @@ class SQLite(
 
     class Cn(
         private val connection: JdbcConnection,
-        override val encoders: Statement.ValueEncoderRegistry
+        override val encoders: Statement.ValueEncoderRegistry,
         parentHook: MutableHookEventBus,
     ) : CnBase(parentHook) {
         private val mutex = Mutex()
@@ -262,8 +263,8 @@ class SQLite(
         private fun createConnectionPool(
             url: String,
             options: ConnectionPool.Options,
+            encoders: Statement.ValueEncoderRegistry,
             parentHook: MutableHookEventBus,
-            encoders: Statement.ValueEncoderRegistry
         ): ConnectionPoolImpl {
             // Ensure the URL has the proper JDBC prefix
             val jdbcUrl = "jdbc:sqlite:${url.removePrefix("jdbc:").removePrefix("sqlite:").removePrefix("//")}"

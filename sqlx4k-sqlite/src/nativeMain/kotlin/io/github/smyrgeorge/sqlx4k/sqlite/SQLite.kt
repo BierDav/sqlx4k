@@ -92,14 +92,14 @@ class SQLite(
     override suspend fun internalBegin(): Result<Transaction> = runCatching {
         sqlx { c -> sqlx4k_tx_begin(rt, c, DriverNativeUtils.fn) }.use {
             it.throwIfError()
-            Tx(rt, it.tx!!)
+            Tx(rt, it.tx!!, encoders, hook)
         }
     }
 
     class Cn(
         private val rt: CPointer<out CPointed>,
         private val cn: CPointer<out CPointed>,
-        override val encoders: Statement.ValueEncoderRegistry
+        override val encoders: Statement.ValueEncoderRegistry,
         parentHook: MutableHookEventBus
     ) : CnBase(parentHook) {
         private val mutex = Mutex()
@@ -155,7 +155,7 @@ class SQLite(
         private var tx: CPointer<out CPointed>,
         override val encoders: Statement.ValueEncoderRegistry,
         parentHook: MutableHookEventBus
-    ) : Transaction {
+    ) : TxBase(parentHook) {
         private val mutex = Mutex()
         private var _status: Transaction.Status = Transaction.Status.Open
         override val status: Transaction.Status get() = _status
