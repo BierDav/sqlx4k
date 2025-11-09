@@ -126,6 +126,7 @@ class MultiplatformLibConventions : Plugin<Project> {
                     val exec = project.serviceOf<ExecOperations>()
                     doLast {
                         exec.exec {
+                            workingDir(file("src/rust"))
                             @Suppress("SimplifyBooleanWithConstants", "KotlinConstantConditions")
                             executable = if (CROSS_ENABLED && useCross) cross else cargo
                             if (target.contains("android")) {
@@ -134,13 +135,11 @@ class MultiplatformLibConventions : Plugin<Project> {
                                     "--platform", "21", // <-- IMPORTANT: Set your minimum API level here
                                     "-t", target,
                                     "build",
-                                    "--manifest-path", file("src/rust/Cargo.toml").absolutePath,
                                     "--release"
                                 )
                             } else {
                                 args(
                                     "build",
-                                    "--manifest-path", file("src/rust/Cargo.toml").absolutePath,
                                     "--target=$target",
                                     "--release"
                                 )
