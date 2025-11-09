@@ -36,9 +36,9 @@ dependencies {
 //    }
 //}
 
-//tasks.withType<KotlinCompilationTask<*>> {
-//    dependsOn("kspCommonMainKotlinMetadata")
-//}
+tasks.withType<KotlinCompilationTask<*>> {
+    dependsOn("kspCommonMainKotlinMetadata")
+}
 
 fun targetsOf(project: Project): List<String> {
     val os = DefaultNativePlatform.getCurrentOperatingSystem()
