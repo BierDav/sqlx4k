@@ -1,4 +1,4 @@
-group = "at.quickme.sqlx4k"
+group = "at.quickme.ksync"
 version = "1.4.6"
 
 plugins {
