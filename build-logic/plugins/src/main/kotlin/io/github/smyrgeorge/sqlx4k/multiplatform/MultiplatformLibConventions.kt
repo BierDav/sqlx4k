@@ -11,6 +11,7 @@ import org.gradle.process.ExecOperations
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.gradle.targets.js.dsl.KotlinWasmTargetDsl
 import java.io.File
 import java.lang.System.getenv
 
@@ -76,6 +77,11 @@ class MultiplatformLibConventions : Plugin<Project> {
                         compilerOptions {
                             jvmTarget.set(JvmTarget.JVM_17)
                         }
+                    }
+                },
+                Pair("wasmJs") {
+                    wasmJs {
+                        rust("wasm32-unknown-unknown", !os.isMacOsX)
                     }
                 },
                 Pair("iosArm64") { iosArm64 { rust("aarch64-apple-ios", !os.isMacOsX) } },
@@ -148,6 +154,34 @@ class MultiplatformLibConventions : Plugin<Project> {
                     }
                 }
                 tasks.getByName(interopProcessingTaskName) { dependsOn(cargo) }
+            }
+        }
+    }
+
+
+    /**
+     * Configures Rust integration for the given Kotlin Native Target.
+     *
+     * @param target Specifies the target triple for the Rust compilation (e.g., "x86_64-pc-windows-gnu").
+     * @param useCross Indicates whether to use the cross-compilation tool (default is false).
+     */
+    private fun KotlinWasmTargetDsl.rust(target: String, useCross: Boolean = false) {
+        val tasks = project.tasks
+        fun file(path: String) = project.projectDir.resolve(path)
+
+        val cargo = tasks.register("cargo-$target") {
+            val exec = project.serviceOf<ExecOperations>()
+            doLast {
+                exec.exec {
+                    workingDir(file("src/rust"))
+                    @Suppress("SimplifyBooleanWithConstants", "KotlinConstantConditions")
+                    executable = if (CROSS_ENABLED && useCross) cross else cargo
+                    args(
+                        "build",
+                        "--target=$target",
+                        "--release"
+                    )
+                }
             }
         }
     }

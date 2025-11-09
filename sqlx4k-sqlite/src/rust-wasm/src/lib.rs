@@ -1,0 +1,611 @@
+use wasm_bindgen::prelude::*;
+use sqlx::migrate::MigrateDatabase;
+use sqlx::pool::PoolConnection;
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqlitePool, SqlitePoolOptions, SqliteRow, SqliteTypeInfo, SqliteValueRef,
+};
+use sqlx::{Acquire, Column, Executor, Row, Sqlite, Transaction, TypeInfo, ValueRef};
+use sqlx4k::{
+    c_chars_to_str, sqlx4k_error_result_of, Ptr, Sqlx4kColumn, Sqlx4kResult, Sqlx4kRow,
+    Sqlx4kSchema, Sqlx4kSchemaColumn,
+};
+use std::{
+    ffi::{c_char, c_int, c_void, CString},
+    ptr::null_mut,
+    sync::OnceLock,
+    time::Duration,
+};
+use tokio::runtime::Runtime;
+
+static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+#[derive(Debug)]
+struct Sqlx4k {
+    pool: SqlitePool,
+}
+
+#[wasm_bindgen]
+impl Sqlx4k {
+    async fn query(&self, sql: &str) -> *mut Sqlx4kResult {
+        let result = self.pool.execute(sql).await;
+        let result = match result {
+            Ok(res) => Sqlx4kResult {
+                rows_affected: res.rows_affected(),
+                ..Default::default()
+            },
+            Err(err) => sqlx4k_error_result_of(err),
+        };
+        result.leak()
+    }
+
+    async fn fetch_all(&self, sql: &str) -> *mut Sqlx4kResult {
+        let result = self.pool.fetch_all(sql).await;
+        sqlx4k_result_of(result).leak()
+    }
+
+    async fn cn_acquire(&self) -> *mut Sqlx4kResult {
+        let cn = self.pool.acquire().await;
+        let cn: PoolConnection<Sqlite> = match cn {
+            Ok(cn) => cn,
+            Err(err) => return sqlx4k_error_result_of(err).leak(),
+        };
+
+        let cn = Box::new(cn);
+        let cn = Box::leak(cn);
+        let result = Sqlx4kResult {
+            cn: cn as *mut _ as *mut c_void,
+            ..Default::default()
+        };
+        result.leak()
+    }
+
+    async fn cn_release(&self, cn: Ptr) -> *mut Sqlx4kResult {
+        if cn.ptr.is_null() {
+            return Sqlx4kResult::default().leak();
+        }
+
+        let cn_ptr = cn.ptr as *mut PoolConnection<Sqlite>;
+        unsafe {
+            // Recreate the Box and drop it, returning connection to pool
+            let _boxed: Box<PoolConnection<Sqlite>> = Box::from_raw(cn_ptr);
+        }
+
+        Sqlx4kResult::default().leak()
+    }
+
+    async fn cn_query(&self, cn: Ptr, sql: &str) -> *mut Sqlx4kResult {
+        let cn = unsafe { &mut *(cn.ptr as *mut PoolConnection<Sqlite>) };
+        let result = cn.execute(sql).await;
+        let result = match result {
+            Ok(res) => Sqlx4kResult {
+                rows_affected: res.rows_affected(),
+                ..Default::default()
+            },
+            Err(err) => sqlx4k_error_result_of(err),
+        };
+        result.leak()
+    }
+
+    async fn cn_fetch_all(&self, cn: Ptr, sql: &str) -> *mut Sqlx4kResult {
+        let cn = unsafe { &mut *(cn.ptr as *mut PoolConnection<Sqlite>) };
+        let result = cn.fetch_all(sql).await;
+        sqlx4k_result_of(result).leak()
+    }
+
+    async fn cn_tx_begin(&self, cn: Ptr) -> *mut Sqlx4kResult {
+        let cn = unsafe { &mut *(cn.ptr as *mut PoolConnection<Sqlite>) };
+        let tx = cn.begin().await;
+        let tx = match tx {
+            Ok(tx) => tx,
+            Err(err) => {
+                return sqlx4k_error_result_of(err).leak();
+            }
+        };
+
+        let tx = Box::new(tx);
+        let tx = Box::leak(tx);
+
+        let result = Sqlx4kResult {
+            tx: tx as *mut _ as *mut c_void,
+            ..Default::default()
+        };
+        result.leak()
+    }
+
+    async fn tx_begin(&self) -> *mut Sqlx4kResult {
+        let tx = self.pool.begin().await;
+        let tx = match tx {
+            Ok(tx) => tx,
+            Err(err) => {
+                return sqlx4k_error_result_of(err).leak();
+            }
+        };
+
+        let tx = Box::new(tx);
+        let tx = Box::leak(tx);
+        let result = Sqlx4kResult {
+            tx: tx as *mut _ as *mut c_void,
+            ..Default::default()
+        };
+        result.leak()
+    }
+
+    async fn tx_commit(&self, tx: Ptr) -> *mut Sqlx4kResult {
+        let tx = unsafe { *Box::from_raw(tx.ptr as *mut Transaction<'_, Sqlite>) };
+        let result = match tx.commit().await {
+            Ok(_) => Sqlx4kResult::default(),
+            Err(err) => sqlx4k_error_result_of(err),
+        };
+        result.leak()
+    }
+
+    async fn tx_rollback(&self, tx: Ptr) -> *mut Sqlx4kResult {
+        let tx = unsafe { *Box::from_raw(tx.ptr as *mut Transaction<'_, Sqlite>) };
+        let result = match tx.rollback().await {
+            Ok(_) => Sqlx4kResult::default(),
+            Err(err) => sqlx4k_error_result_of(err),
+        };
+        result.leak()
+    }
+
+    async fn tx_query(&self, tx: Ptr, sql: &str) -> *mut Sqlx4kResult {
+        let mut tx = unsafe { *Box::from_raw(tx.ptr as *mut Transaction<'_, Sqlite>) };
+        let result = tx.execute(sql).await;
+        let tx = Box::new(tx);
+        let tx = Box::into_raw(tx);
+        let result = match result {
+            Ok(res) => Sqlx4kResult {
+                rows_affected: res.rows_affected(),
+                ..Default::default()
+            },
+            Err(err) => sqlx4k_error_result_of(err),
+        };
+        let result = Sqlx4kResult {
+            tx: tx as *mut c_void,
+            ..result
+        };
+        result.leak()
+    }
+
+    async fn tx_fetch_all(&self, tx: Ptr, sql: &str) -> *mut Sqlx4kResult {
+        let mut tx = unsafe { *Box::from_raw(tx.ptr as *mut Transaction<'_, Sqlite>) };
+        let result = tx.fetch_all(sql).await;
+        let tx = Box::new(tx);
+        let tx = Box::into_raw(tx);
+        let result = sqlx4k_result_of(result);
+        let result = Sqlx4kResult {
+            tx: tx as *mut c_void,
+            ..result
+        };
+        result.leak()
+    }
+
+    async fn close(&self) -> *mut Sqlx4kResult {
+        self.pool.close().await;
+        Sqlx4kResult::default().leak()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_of(
+    url: *const c_char,
+    username: *const c_char,
+    password: *const c_char,
+    min_connections: c_int,
+    max_connections: c_int,
+    acquire_timeout_milis: c_int,
+    idle_timeout_milis: c_int,
+    max_lifetime_milis: c_int,
+) -> *mut Sqlx4kResult {
+    let url = c_chars_to_str(url);
+    let _username = username;
+    let _password = password;
+    let options: SqliteConnectOptions = url.parse().unwrap();
+
+    // Create the tokio runtime.
+    let runtime = if RUNTIME.get().is_some() {
+        RUNTIME.get().unwrap()
+    } else {
+        let rt = Runtime::new().unwrap();
+        RUNTIME.set(rt).unwrap();
+        RUNTIME.get().unwrap()
+    };
+
+    // Create the db pool options.
+    let pool = SqlitePoolOptions::new().max_connections(max_connections as u32);
+
+    let pool = if min_connections > 0 {
+        pool.min_connections(min_connections as u32)
+    } else {
+        pool
+    };
+
+    let pool = if acquire_timeout_milis > 0 {
+        pool.acquire_timeout(Duration::from_millis(acquire_timeout_milis as u64))
+    } else {
+        pool
+    };
+
+    let pool = if idle_timeout_milis > 0 {
+        pool.idle_timeout(Duration::from_millis(idle_timeout_milis as u64))
+    } else {
+        pool
+    };
+
+    let pool = if max_lifetime_milis > 0 {
+        pool.max_lifetime(Duration::from_millis(max_lifetime_milis as u64))
+    } else {
+        pool
+    };
+
+    // Creat the database file if not exists.
+    runtime.block_on(async {
+        if !sqlx::Sqlite::database_exists(&url).await.unwrap() {
+            sqlx::Sqlite::create_database(&url).await.unwrap();
+        }
+    });
+
+    let pool = pool.connect_with(options);
+
+    // Create the pool here.
+    let pool = runtime.block_on(pool);
+    let pool: SqlitePool = match pool {
+        Ok(pool) => pool,
+        Err(err) => return sqlx4k_error_result_of(err).leak(),
+    };
+    let sqlx4k = Sqlx4k { pool };
+    let sqlx4k = Box::new(sqlx4k);
+    let sqlx4k = Box::leak(sqlx4k);
+
+    Sqlx4kResult {
+        rt: sqlx4k as *mut _ as *mut c_void,
+        ..Default::default()
+    }
+    .leak()
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_pool_size(rt: *mut c_void) -> c_int {
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    sqlx4k.pool.size() as c_int
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_pool_idle_size(rt: *mut c_void) -> c_int {
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    sqlx4k.pool.num_idle() as c_int
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_close(
+    rt: *mut c_void,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let callback = Ptr { ptr: callback };
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.close().await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_query(
+    rt: *mut c_void,
+    sql: *const c_char,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let callback = Ptr { ptr: callback };
+    let sql = c_chars_to_str(sql).to_owned();
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.query(&sql).await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_fetch_all(
+    rt: *mut c_void,
+    sql: *const c_char,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let callback = Ptr { ptr: callback };
+    let sql = c_chars_to_str(sql).to_owned();
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.fetch_all(&sql).await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_cn_acquire(
+    rt: *mut c_void,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let callback = Ptr { ptr: callback };
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.cn_acquire().await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_cn_release(
+    rt: *mut c_void,
+    cn: *mut c_void,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let cn = Ptr { ptr: cn };
+    let callback = Ptr { ptr: callback };
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.cn_release(cn).await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_cn_query(
+    rt: *mut c_void,
+    cn: *mut c_void,
+    sql: *const c_char,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let cn = Ptr { ptr: cn };
+    let callback = Ptr { ptr: callback };
+    let sql = c_chars_to_str(sql).to_owned();
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.cn_query(cn, &sql).await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_cn_fetch_all(
+    rt: *mut c_void,
+    cn: *mut c_void,
+    sql: *const c_char,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let cn = Ptr { ptr: cn };
+    let callback = Ptr { ptr: callback };
+    let sql = c_chars_to_str(sql).to_owned();
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.cn_fetch_all(cn, &sql).await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_cn_tx_begin(
+    rt: *mut c_void,
+    cn: *mut c_void,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let cn = Ptr { ptr: cn };
+    let callback = Ptr { ptr: callback };
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.cn_tx_begin(cn).await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_tx_begin(
+    rt: *mut c_void,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let callback = Ptr { ptr: callback };
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.tx_begin().await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_tx_commit(
+    rt: *mut c_void,
+    tx: *mut c_void,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let tx = Ptr { ptr: tx };
+    let callback = Ptr { ptr: callback };
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.tx_commit(tx).await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_tx_rollback(
+    rt: *mut c_void,
+    tx: *mut c_void,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let tx = Ptr { ptr: tx };
+    let callback = Ptr { ptr: callback };
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.tx_rollback(tx).await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_tx_query(
+    rt: *mut c_void,
+    tx: *mut c_void,
+    sql: *const c_char,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let tx = Ptr { ptr: tx };
+    let callback = Ptr { ptr: callback };
+    let sql = c_chars_to_str(sql).to_owned();
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.tx_query(tx, &sql).await;
+        fun(callback, result)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn sqlx4k_tx_fetch_all(
+    rt: *mut c_void,
+    tx: *mut c_void,
+    sql: *const c_char,
+    callback: *mut c_void,
+    fun: extern "C" fn(Ptr, *mut Sqlx4kResult),
+) {
+    let tx = Ptr { ptr: tx };
+    let callback = Ptr { ptr: callback };
+    let sql = c_chars_to_str(sql).to_owned();
+    let runtime = RUNTIME.get().unwrap();
+    let sqlx4k = unsafe { &*(rt as *mut Sqlx4k) };
+    runtime.spawn(async move {
+        let result = sqlx4k.tx_fetch_all(tx, &sql).await;
+        fun(callback, result)
+    });
+}
+
+fn sqlx4k_result_of(result: Result<Vec<SqliteRow>, sqlx::Error>) -> Sqlx4kResult {
+    match result {
+        Ok(rows) => {
+            let schema: Sqlx4kSchema = if rows.len() > 0 {
+                sqlx4k_schema_of(rows.get(0).unwrap())
+            } else {
+                Sqlx4kSchema::default()
+            };
+
+            let schema = Box::new(schema);
+            let schema = Box::leak(schema);
+
+            let rows: Vec<Sqlx4kRow> = rows.iter().map(|r| sqlx4k_row_of(r)).collect();
+            let size = rows.len();
+            let rows: Box<[Sqlx4kRow]> = rows.into_boxed_slice();
+            let rows: &mut [Sqlx4kRow] = Box::leak(rows);
+            let rows: *mut Sqlx4kRow = rows.as_mut_ptr();
+
+            Sqlx4kResult {
+                schema,
+                size: size as c_int,
+                rows,
+                ..Default::default()
+            }
+        }
+        Err(err) => sqlx4k_error_result_of(err),
+    }
+}
+
+fn sqlx4k_schema_of(row: &SqliteRow) -> Sqlx4kSchema {
+    let columns = row.columns();
+    if columns.is_empty() {
+        Sqlx4kSchema::default()
+    } else {
+        let columns: Vec<Sqlx4kSchemaColumn> = row
+            .columns()
+            .iter()
+            .map(|c| {
+                let name: &str = c.name();
+                let value_ref: SqliteValueRef = row.try_get_raw(c.ordinal()).unwrap();
+                let info: std::borrow::Cow<SqliteTypeInfo> = value_ref.type_info();
+                let kind: &str = info.name();
+                Sqlx4kSchemaColumn {
+                    ordinal: c.ordinal() as c_int,
+                    name: CString::new(name).unwrap().into_raw(),
+                    kind: CString::new(kind).unwrap().into_raw(),
+                }
+            })
+            .collect();
+
+        let size = columns.len();
+        let columns: Box<[Sqlx4kSchemaColumn]> = columns.into_boxed_slice();
+        let columns: &mut [Sqlx4kSchemaColumn] = Box::leak(columns);
+        let columns: *mut Sqlx4kSchemaColumn = columns.as_mut_ptr();
+
+        Sqlx4kSchema {
+            size: size as c_int,
+            columns,
+        }
+    }
+}
+
+fn sqlx4k_row_of(row: &SqliteRow) -> Sqlx4kRow {
+    let columns = row.columns();
+    if columns.is_empty() {
+        Sqlx4kRow::default()
+    } else {
+        let columns: Vec<Sqlx4kColumn> = row
+            .columns()
+            .iter()
+            .map(|c| {
+                let value_ref: SqliteValueRef = row.try_get_raw(c.ordinal()).unwrap();
+                let info: std::borrow::Cow<SqliteTypeInfo> = value_ref.type_info();
+                let type_info = info.name();
+                let value = if type_info == "BLOB" {
+                    let bytes: Option<&[u8]> = row.get_unchecked(c.ordinal());
+                    if bytes.is_none() {
+                        null_mut()
+                    } else {
+                        CString::new(hex::encode(bytes.unwrap()))
+                            .unwrap()
+                            .into_raw()
+                    }
+                } else {
+                    let value: Option<&str> = row.get_unchecked(c.ordinal());
+                    if value.is_none() {
+                        null_mut()
+                    } else {
+                        CString::new(value.unwrap()).unwrap().into_raw()
+                    }
+                };
+
+                Sqlx4kColumn {
+                    ordinal: c.ordinal() as c_int,
+                    value,
+                }
+            })
+            .collect();
+
+        let size = columns.len();
+        let columns: Box<[Sqlx4kColumn]> = columns.into_boxed_slice();
+        let columns: &mut [Sqlx4kColumn] = Box::leak(columns);
+        let columns: *mut Sqlx4kColumn = columns.as_mut_ptr();
+
+        Sqlx4kRow {
+            size: size as c_int,
+            columns,
+        }
+    }
+}
