@@ -48,7 +48,7 @@ jobs:
           ndk-version: r27  # Using a stable NDK version
 
       - name: Install cargo-ndk
-        run: cargo binstall cargo-ndk
+        run: cargo install cargo-ndk
 
       - name: Setup Cache
         uses: actions/cache@v4
