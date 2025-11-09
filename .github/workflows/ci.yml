@@ -1,6 +1,6 @@
 name: Build
 permissions:
-  contents: read
+  contents: read # Default top-level permission
 
 on:
   push:
@@ -13,6 +13,12 @@ jobs:
   build-apple:
     runs-on: macos-latest
     environment: Maven Central
+
+    # Add permissions for the GITHUB_TOKEN for this specific job
+    permissions:
+      contents: read # Required for actions/checkout
+      packages: write # Required to publish to GitHub Packages
+
     steps:
       - name: Checkout Project
         uses: actions/checkout@v5
@@ -39,5 +45,12 @@ jobs:
             sqlx4k-sqlite/src/rust/target
           key: rust-lib-cache-apple
 
+      - name: Create properties.local
+        run: |
+          echo "githubActor=${{ github.actor }}" > properties.local
+          echo "githubToken=${{ secrets.GITHUB_TOKEN }}" >> properties.local
+        # The GITHUB_TOKEN is automatically provided by GitHub Actions
+        # and gets its permissions from the 'permissions' block above.
+
       - name: Gradle Build
-        run: ./gradlew build -x test -x jvmTest -x macosArm64Test
+        run: ./gradlew publishAllPublicationsToGithubRepository
