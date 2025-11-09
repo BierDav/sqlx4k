@@ -41,10 +41,13 @@ jobs:
             sqlx4k-sqlite/src/rust/target
           key: rust-lib-cache-apple
 
-      - name: Create properties.local
+      - name: Create local.properties
         run: |
-          echo "githubActor=${{ github.actor }}" > properties.local
-          echo "githubToken=${{ secrets.GITHUB_TOKEN }}" >> properties.local
+          echo "githubActor=${{ github.actor }}" > local.properties
+          echo "githubToken=${{ secrets.GITHUB_TOKEN }}" >> local.properties
+          echo "signingInMemoryKeyId=${{ secrets.SIGNINGINMEMORYKEYID }}" >> local.properties
+          echo "signingInMemoryKeyPassword=${{ secrets.SIGNINGINMEMORYKEYPASSWORD }}" >> local.properties
+          echo "signingInMemoryKey=${{ secrets.SIGNINGINMEMORYKEY }}" >> local.properties
         # The GITHUB_TOKEN is automatically provided by GitHub Actions
         # and gets its permissions from the 'permissions' block above.
 
