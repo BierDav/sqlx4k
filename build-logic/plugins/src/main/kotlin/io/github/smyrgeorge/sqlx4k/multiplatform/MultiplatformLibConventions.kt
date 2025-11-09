@@ -126,8 +126,9 @@ class MultiplatformLibConventions : Plugin<Project> {
                     val exec = project.serviceOf<ExecOperations>()
                     doLast {
                         exec.exec {
+                            @Suppress("SimplifyBooleanWithConstants", "KotlinConstantConditions")
+                            executable = if (CROSS_ENABLED && useCross) cross else cargo
                             if (target.contains("android")) {
-                                executable = "cargo"
                                 args(
                                     "ndk",
                                     "--platform", "21", // <-- IMPORTANT: Set your minimum API level here
@@ -136,11 +137,7 @@ class MultiplatformLibConventions : Plugin<Project> {
                                     "--manifest-path", file("src/rust/Cargo.toml").absolutePath,
                                     "--release"
                                 )
-                                // The ANDROID_NDK_HOME variable set in your GHA workflow will be automatically used by cargo ndk
                             } else {
-                                // Existing logic for other platforms
-                                @Suppress("SimplifyBooleanWithConstants", "KotlinConstantConditions")
-                                executable = if (CROSS_ENABLED && useCross) cross else cargo
                                 args(
                                     "build",
                                     "--manifest-path", file("src/rust/Cargo.toml").absolutePath,
