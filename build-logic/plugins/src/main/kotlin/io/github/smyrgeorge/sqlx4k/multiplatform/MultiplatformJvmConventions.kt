@@ -11,11 +11,7 @@ class MultiplatformJvmConventions : Plugin<Project> {
     override fun apply(project: Project) {
         project.plugins.apply("org.jetbrains.kotlin.multiplatform")
         project.extensions.configure<KotlinMultiplatformExtension> {
-            jvm {
-                compilerOptions {
-                    jvmTarget.set(JvmTarget.JVM_21)
-                }
-            }
+            jvm ()
             applyDefaultHierarchyTemplate()
         }
     }

@@ -23,7 +23,7 @@ jobs:
       - name: Set dynamic version
         run: |
           ls -l
-          sed -i '' 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
+          sed -i 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
 
       - name: Create local.properties
         run: |
@@ -80,7 +80,7 @@ jobs:
       - name: Set dynamic version
         run: |
           ls -l
-          sed -i '' 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
+          sed -i 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
 
       - name: Create local.properties
         run: |
@@ -148,6 +148,13 @@ jobs:
 
 
       - name: Gradle Build
-        run: ./gradlew publishAllPublicationsToGithubRepository -Ptargets=non-apple
+        run: |
+          ./gradlew \
+          sqlx4k:publishAllPublicationsToGithubRepository \
+          sqlx4k-mysql:publishAllPublicationsToGithubRepository \
+          sqlx4k-postgres:publishAllPublicationsToGithubRepository \
+          sqlx4k-postgres-pgmq:publishAllPublicationsToGithubRepository \
+          sqlx4k-sqlite:publishAllPublicationsToGithubRepository \
+          -Ptargets=non-apple
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
