@@ -87,7 +87,7 @@ jobs:
           echo "signingInMemoryKey=${{ secrets.SIGNINGINMEMORYKEY }}" >> local.properties
 
       - name: Set dynamic version
-        run: sed -i '' 's/version = "[^"]*"/version = "1.6.${{ github.run_attempt }}"/' build.gradle.kts
+        run: sed -i '' 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
 
       - name: Gradle Build
         run: ./gradlew publishAllPublicationsToGithubRepository -Ptargets=all
