@@ -66,7 +66,14 @@ jobs:
           rustup target add x86_64-apple-darwin
 
       - name: Gradle Build
-        run: ./gradlew publishAllPublicationsToGithubRepository -Ptargets=apple
+        run: |
+          ./gradlew 
+          sqlx4k:publishAllPublicationsToGithubRepository \
+          sqlx4k-mysql:publishAllPublicationsToGithubRepository \
+          sqlx4k-postgres:publishAllPublicationsToGithubRepository \
+          sqlx4k-postgres-pgmq:publishAllPublicationsToGithubRepository \
+          sqlx4k-sqlite:publishAllPublicationsToGithubRepository \
+          -Ptargets=apple
 
   build-non-apple:
     runs-on: ubuntu-latest
@@ -149,12 +156,8 @@ jobs:
 
       - name: Gradle Build
         run: |
-          ./gradlew \
-          sqlx4k:publishAllPublicationsToGithubRepository \
-          sqlx4k-mysql:publishAllPublicationsToGithubRepository \
-          sqlx4k-postgres:publishAllPublicationsToGithubRepository \
-          sqlx4k-postgres-pgmq:publishAllPublicationsToGithubRepository \
-          sqlx4k-sqlite:publishAllPublicationsToGithubRepository \
+          ./gradlew 
+          publishAllPublicationsToGithubRepository \
           -Ptargets=non-apple
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
