@@ -9,9 +9,6 @@ on:
 jobs:
   build-apple:
     runs-on: macos-latest
-    environment: Maven Central
-
-    # Add permissions for the GITHUB_TOKEN for this specific job
     permissions:
       contents: read # Required for actions/checkout
       packages: write # Required to publish to GitHub Packages
@@ -73,6 +70,9 @@ jobs:
 
   build-non-apple:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout Project
         uses: actions/checkout@v5

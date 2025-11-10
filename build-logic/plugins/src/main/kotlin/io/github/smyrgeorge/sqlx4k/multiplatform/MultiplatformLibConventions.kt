@@ -66,7 +66,7 @@ class MultiplatformLibConventions : Plugin<Project> {
         ?.resolve(".cargo/bin/cross$exeExt")?.absolutePath
         ?: throw GradleException("Rust cross binary is required to build project but it wasn't found.")
 
-    @OptIn(ExperimentalWasmDsl::class)
+    @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
     override fun apply(project: Project) {
         val targets = Utils.targetsOf(project)
         project.plugins.apply("org.jetbrains.kotlin.multiplatform")
