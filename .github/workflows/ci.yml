@@ -64,6 +64,7 @@ jobs:
         id: setup-ndk
         with:
           ndk-version: r27  # Using a stable NDK version
+          local-cache: true
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
