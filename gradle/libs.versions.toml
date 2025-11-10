@@ -4,7 +4,7 @@ kotlin = "2.2.21"
 # https://github.com/Kotlin/kotlinx-io
 kotlinx-io = "0.8.0"
 # https://github.com/Kotlin/kotlinx-datetime
-kotlinx-datetime = "0.7.1"
+kotlinx-datetime = "0.7.1-0.6.x-compat"
 # https://github.com/Kotlin/kotlinx.coroutines
 kotlinx-coroutines = "1.10.2"
 # https://github.com/Kotlin/kotlinx.serialization
@@ -16,7 +16,7 @@ dokka = "2.1.0"
 # https://github.com/willowtreeapps/assertk
 assertk = "0.28.1"
 # https://github.com/google/ksp/releases
-ksp = "2.3.1"
+ksp = "2.3.2"
 # https://plugins.gradle.org/plugin/org.springframework.boot
 spring-boot = "3.5.7"
 # https://plugins.gradle.org/plugin/io.spring.dependency-management
@@ -38,8 +38,6 @@ calcite = "1.41.0"
 log4k = "1.1.2"
 # https://github.com/xerial/sqlite-jdbc
 sqlite-jdbc = "3.50.3.0"
-# https://github.com/touchlab/Stately
-stately = "2.1.0"
 
 [libraries]
 gradle-kotlin-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -51,7 +49,7 @@ kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.re
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-reactive = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-reactive", version.ref = "kotlinx-coroutines" }
-kotlinx-serialisation-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+kotlinx-serialisation-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialisation" }
 assertk = { module = "com.willowtreeapps.assertk:assertk", version.ref = "assertk" }
 r2dbc-pool = { module = "io.r2dbc:r2dbc-pool", version.ref = "r2dbc-pool" }
 r2dbc-mysql = { module = "io.asyncer:r2dbc-mysql", version.ref = "r2dbc-mysql" }
@@ -60,7 +58,6 @@ jsqlparser = { module = "com.github.jsqlparser:jsqlparser", version.ref = "jsqlp
 calcite-core = { module = "org.apache.calcite:calcite-core", version.ref = "calcite" }
 log4k-slf4j = { module = "io.github.smyrgeorge:log4k-slf4j", version.ref = "log4k" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
-stately-concurrency-collections = { module = "co.touchlab:stately-concurrent-collections", version.ref = "stately" }
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
