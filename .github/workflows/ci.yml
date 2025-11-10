@@ -29,6 +29,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
 
+
+
       - name: Setup Rust & cargo
         run: |
           rustup target add aarch64-apple-ios
@@ -63,9 +65,17 @@ jobs:
         with:
           path: |
             /home/runner/.konan
-            sqlx4k-mysql/src/rust/target
-            sqlx4k-postgres/src/rust/target
-            sqlx4k-sqlite/src/rust/target
+          key: general-lib-cache-apple
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            sqlx4k-mysql/src/rust
+            sqlx4k-postgres/src/rust
+            sqlx4k-sqlite/src/rust
+          cache-all-crates: 'true'
+          cache-bin: 'true'
           key: rust-lib-cache-apple
 
       - name: Create local.properties
