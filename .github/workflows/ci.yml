@@ -69,7 +69,7 @@ jobs:
         run: |
           ./gradlew \
           publishIosArm64PublicationToGithubRepository \
-          publishIosX64PublicationToGithubRepository \
+          publishIosSimulatorArm64PublicationToGithubRepository \
           publishMacosArm64PublicationToGithubRepository \
           publishMacosX64PublicationToGithubRepository \
           -Ptargets=apple
