@@ -28,7 +28,7 @@ interface Connection : QueryExecutor, QueryExecutor.Transactional, HookApi {
      */
     fun assertIsOpen() {
         if (status != Status.Open) {
-            SQLError(SQLError.Code.ConnectionIsOpen, "Connection has already been closed.").ex()
+            SQLError(SQLError.Code.ConnectionIsClosed, "Connection has already been closed.").ex()
         }
     }
 
