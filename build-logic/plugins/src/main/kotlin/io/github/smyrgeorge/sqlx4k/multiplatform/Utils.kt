@@ -75,6 +75,21 @@ object Utils {
                     "linuxX64",
                     "mingwX64",
                 )
+                "apple" -> listOf(
+                    "iosArm64",
+                    "iosSimulatorArm64",
+                    "macosArm64",
+                    "macosX64",
+                )
+                "non-apple" -> listOf(
+                    "jvm",
+                    "wasmJs",
+                    "androidNativeX64",
+                    "androidNativeArm64",
+                    "linuxArm64",
+                    "linuxX64",
+                    "mingwX64",
+                )
 
                 else -> it.split(",").map { t -> t.trim() }
             }

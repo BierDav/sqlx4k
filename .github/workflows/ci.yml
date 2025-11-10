@@ -7,8 +7,9 @@ on:
 #  push:
 
 jobs:
-  deploy:
+  build-apple:
     runs-on: macos-latest
+    concurrency: build
     environment: Maven Central
 
     # Add permissions for the GITHUB_TOKEN for this specific job
@@ -51,13 +52,8 @@ jobs:
         run: |
           rustup target add aarch64-apple-ios
           rustup target add aarch64-apple-ios-sim
-          rustup target add x86_64-linux-android
-          rustup target add aarch64-linux-android
           rustup target add aarch64-apple-darwin
           rustup target add x86_64-apple-darwin
-          rustup target add aarch64-unknown-linux-gnu
-          rustup target add x86_64-unknown-linux-gnu
-          rustup target add x86_64-pc-windows-gnu
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
@@ -74,12 +70,6 @@ jobs:
       - name: Install MinGW-w64
         run: brew install mingw-w64
 
-      - name: Setup Linux Cross-Compilers (via Homebrew)
-        run: |
-          brew tap messense/macos-cross-toolchains
-          brew install aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu
-
-     
 
       - name: Create local.properties
         run: |
@@ -93,6 +83,83 @@ jobs:
         run: sed -i '' 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
 
       - name: Gradle Build
-        run: ./gradlew publishAllPublicationsToGithubRepository -Ptargets=all
+        run: ./gradlew publishAllPublicationsToGithubRepository -Ptargets=apple
+
+  build-rest:
+    runs-on: ubuntu-latest
+    concurrency: build
+    steps:
+      - name: Checkout Project
+        uses: actions/checkout@v5
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: corretto
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Setup Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /home/runner/.konan
+          key: general-lib-cache
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            sqlx4k-mysql/src/rust
+            sqlx4k-postgres/src/rust
+            sqlx4k-sqlite/src/rust
+          cache-all-crates: 'true'
+          cache-bin: 'true'
+          key: rust-lib-cache
+
+      - name: Setup Rust & cargo
+        run: |
+          rustup target add x86_64-linux-android
+          rustup target add aarch64-linux-android
+          rustup target add aarch64-unknown-linux-gnu
+          rustup target add x86_64-unknown-linux-gnu
+          rustup target add x86_64-pc-windows-gnu
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27  # Using a stable NDK version
+          local-cache: true
+
+      - name: Install cargo-ndk (with cache)
+        uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Install Toolchains
+        run: |
+          sudo apt update
+          sudo apt install \
+          build-essential \
+          gcc-aarch64-linux-gnu \
+          g++-aarch64-linux-gnu \
+          mingw-w64
+
+      - name: Create local.properties
+        run: |
+          echo "githubActor=${{ github.actor }}" > local.properties
+          echo "githubToken=${{ secrets.GITHUB_TOKEN }}" >> local.properties
+          echo "signingInMemoryKeyId=${{ secrets.SIGNINGINMEMORYKEYID }}" >> local.properties
+          echo "signingInMemoryKeyPassword=${{ secrets.SIGNINGINMEMORYKEYPASSWORD }}" >> local.properties
+          echo "signingInMemoryKey=${{ secrets.SIGNINGINMEMORYKEY }}" >> local.properties
+
+      - name: Set dynamic version
+        run: sed -i '' 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
+
+      - name: Gradle Build
+        run: ./gradlew publishAllPublicationsToGithubRepository -Ptargets=non-apple
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
