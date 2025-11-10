@@ -9,7 +9,6 @@ on:
 jobs:
   build-apple:
     runs-on: macos-latest
-    concurrency: build
     environment: Maven Central
 
     # Add permissions for the GITHUB_TOKEN for this specific job
@@ -87,7 +86,6 @@ jobs:
 
   build-rest:
     runs-on: ubuntu-latest
-    concurrency: build
     steps:
       - name: Checkout Project
         uses: actions/checkout@v5
