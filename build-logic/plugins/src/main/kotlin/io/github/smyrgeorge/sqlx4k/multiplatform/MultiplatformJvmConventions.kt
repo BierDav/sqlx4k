@@ -9,10 +9,6 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 @Suppress("unused")
 class MultiplatformJvmConventions : Plugin<Project> {
     override fun apply(project: Project) {
-        project.plugins.apply("org.jetbrains.kotlin.multiplatform")
-        project.extensions.configure<KotlinMultiplatformExtension> {
-            jvm ()
-            applyDefaultHierarchyTemplate()
-        }
+        project.plugins.apply("org.jetbrains.kotlin.jvm")
     }
 }

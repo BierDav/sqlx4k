@@ -27,12 +27,6 @@ class PublishConventions : Plugin<Project> {
         project.plugins.apply("signing")
         project.extensions.configure<MavenPublishBaseExtension> {
             // Source publishing is always enabled by the Kotlin Multiplatform plugin.
-            configure(
-                KotlinMultiplatform(
-                    // Whether to publish a 'sources' jar.
-                    sourcesJar = true,
-                )
-            )
             coordinates(
                 groupId = project.group as String,
                 artifactId = project.name,
