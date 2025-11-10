@@ -26,7 +26,7 @@ class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) :
         listenersMutex.withLock {
             val newMap = listeners.load().toMutableMap()
             for (eventType in eventTypes)
-                newMap[eventType] = newMap[eventType]?.apply { plus(handler) } ?: mutableSetOf(handler)
+                newMap[eventType] = newMap[eventType]?.plus(handler) ?: mutableSetOf(handler)
             listeners.exchange(newMap)
         }
         try {
