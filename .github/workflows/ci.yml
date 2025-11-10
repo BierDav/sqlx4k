@@ -20,6 +20,11 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v5
 
+      - name: Set dynamic version
+        run: |
+          ls -l
+          sed -i '' 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
+
       - name: Create local.properties
         run: |
           echo "githubActor=${{ github.actor }}" > local.properties
@@ -28,8 +33,6 @@ jobs:
           echo "signingInMemoryKeyPassword=${{ secrets.SIGNINGINMEMORYKEYPASSWORD }}" >> local.properties
           echo "signingInMemoryKey=${{ secrets.SIGNINGINMEMORYKEY }}" >> local.properties
 
-      - name: Set dynamic version
-        run: sed -i '' 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -74,6 +77,11 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v5
 
+      - name: Set dynamic version
+        run: |
+          ls -l
+          sed -i '' 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
+
       - name: Create local.properties
         run: |
           echo "githubActor=${{ github.actor }}" > local.properties
@@ -81,10 +89,6 @@ jobs:
           echo "signingInMemoryKeyId=${{ secrets.SIGNINGINMEMORYKEYID }}" >> local.properties
           echo "signingInMemoryKeyPassword=${{ secrets.SIGNINGINMEMORYKEYPASSWORD }}" >> local.properties
           echo "signingInMemoryKey=${{ secrets.SIGNINGINMEMORYKEY }}" >> local.properties
-
-      - name: Set dynamic version
-        run: sed -i '' 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
-
 
       - name: Setup Java
         uses: actions/setup-java@v5
