@@ -5,6 +5,7 @@ plugins {
 }
 
 kotlin {
+    jvm()
     sourceSets {
         configureEach {
             languageSettings.progressiveMode = true
@@ -26,5 +27,10 @@ kotlin {
                 implementation(libs.sqlite.jdbc)
             }
         }
+//        wasmJsMain {
+//            dependencies {
+//                implementation(npm("@sqlite.org/sqlite-wasm","3.51.0-build1"))
+//            }
+//        }
     }
 }

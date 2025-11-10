@@ -8,10 +8,9 @@ import org.gradle.kotlin.dsl.get
 import org.gradle.kotlin.dsl.support.serviceOf
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
 import org.gradle.process.ExecOperations
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
-import org.jetbrains.kotlin.gradle.targets.js.dsl.KotlinWasmTargetDsl
+import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
 import java.io.File
 import java.lang.System.getenv
 
@@ -67,23 +66,13 @@ class MultiplatformLibConventions : Plugin<Project> {
         ?.resolve(".cargo/bin/cross$exeExt")?.absolutePath
         ?: throw GradleException("Rust cross binary is required to build project but it wasn't found.")
 
+    @OptIn(ExperimentalWasmDsl::class)
     override fun apply(project: Project) {
         val targets = Utils.targetsOf(project)
         project.plugins.apply("org.jetbrains.kotlin.multiplatform")
         project.extensions.configure<KotlinMultiplatformExtension> {
-            val availableTargets = mapOf(
-                Pair("jvm") {
-                    jvm {
-                        compilerOptions {
-                            jvmTarget.set(JvmTarget.JVM_17)
-                        }
-                    }
-                },
-                Pair("wasmJs") {
-                    wasmJs {
-                        rust("wasm32-unknown-unknown", !os.isMacOsX)
-                    }
-                },
+            val availableTargets = mutableMapOf<String, () -> Unit>(
+                Pair("jvm") { jvm() },
                 Pair("iosArm64") { iosArm64 { rust("aarch64-apple-ios", !os.isMacOsX) } },
                 Pair("iosSimulatorArm64") { iosSimulatorArm64 { rust("aarch64-apple-ios-sim", !os.isMacOsX) } },
                 Pair("androidNativeArm64") { androidNativeArm64 { rust("aarch64-linux-android", true) } },
@@ -95,10 +84,27 @@ class MultiplatformLibConventions : Plugin<Project> {
                 Pair("mingwX64") { mingwX64 { rust("x86_64-pc-windows-gnu", true) } },
             )
 
-            targets.forEach {
-                println("Enabling target $it")
-                availableTargets[it]?.invoke()
-            }
+            if (project.name == "sqlx4k")
+                availableTargets.putAll(
+                    mapOf(
+                        Pair("wasmJs") {
+                            wasmJs {
+                                browser()
+                                nodejs()
+                            }
+                            wasmWasi {
+                                nodejs()
+                            }
+                        }
+                    )
+                )
+
+            targets
+                .mapNotNull { availableTargets[it]?.let { t -> it to t } }
+                .forEach { (target, block) ->
+                    println("Enabling target $target")
+                    block.invoke()
+                }
 
             applyDefaultHierarchyTemplate()
         }
@@ -154,34 +160,6 @@ class MultiplatformLibConventions : Plugin<Project> {
                     }
                 }
                 tasks.getByName(interopProcessingTaskName) { dependsOn(cargo) }
-            }
-        }
-    }
-
-
-    /**
-     * Configures Rust integration for the given Kotlin Native Target.
-     *
-     * @param target Specifies the target triple for the Rust compilation (e.g., "x86_64-pc-windows-gnu").
-     * @param useCross Indicates whether to use the cross-compilation tool (default is false).
-     */
-    private fun KotlinWasmTargetDsl.rust(target: String, useCross: Boolean = false) {
-        val tasks = project.tasks
-        fun file(path: String) = project.projectDir.resolve(path)
-
-        val cargo = tasks.register("cargo-$target") {
-            val exec = project.serviceOf<ExecOperations>()
-            doLast {
-                exec.exec {
-                    workingDir(file("src/rust"))
-                    @Suppress("SimplifyBooleanWithConstants", "KotlinConstantConditions")
-                    executable = if (CROSS_ENABLED && useCross) cross else cargo
-                    args(
-                        "build",
-                        "--target=$target",
-                        "--release"
-                    )
-                }
             }
         }
     }

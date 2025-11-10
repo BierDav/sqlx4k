@@ -64,6 +64,7 @@ object Utils {
             when (it) {
                 "all" -> listOf(
                     "jvm",
+                    "wasmJs",
                     "iosArm64",
                     "iosSimulatorArm64",
                     "androidNativeX64",
@@ -72,10 +73,10 @@ object Utils {
                     "macosX64",
                     "linuxArm64",
                     "linuxX64",
-                    "mingwX64"
+                    "mingwX64",
                 )
 
                 else -> it.split(",").map { t -> t.trim() }
             }
-        } ?: listOf("jvm", defaultTarget) // Default for local development.
+        } ?: listOf("jvm", "wasmJs", defaultTarget) // Default for local development.
 }
