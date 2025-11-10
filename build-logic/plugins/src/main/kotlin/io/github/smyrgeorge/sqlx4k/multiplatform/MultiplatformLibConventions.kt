@@ -92,9 +92,6 @@ class MultiplatformLibConventions : Plugin<Project> {
                                 browser()
                                 nodejs()
                             }
-                            wasmWasi {
-                                nodejs()
-                            }
                         }
                     )
                 )
