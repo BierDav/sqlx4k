@@ -155,5 +155,3 @@ jobs:
           ./gradlew \
           publishAllPublicationsToGithubRepository \
           -Ptargets=non-apple
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
