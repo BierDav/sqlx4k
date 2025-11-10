@@ -10,7 +10,6 @@ import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
 import org.gradle.process.ExecOperations
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
-import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
 import java.io.File
 import java.lang.System.getenv
 

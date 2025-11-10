@@ -76,7 +76,6 @@ object Utils {
                     "mingwX64",
                 )
                 "apple" -> listOf(
-                    "jvm",
                     "iosArm64",
                     "iosSimulatorArm64",
                     "macosArm64",
