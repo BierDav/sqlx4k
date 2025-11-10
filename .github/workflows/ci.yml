@@ -68,7 +68,10 @@ jobs:
       - name: Gradle Build
         run: |
           ./gradlew \
-          publishAllPublicationsToGithubRepository \
+          publishIosArm64PublicationToGithubRepository \
+          publishIosArmX64PublicationToGithubRepository \
+          publishMacosArm64PublicationToGithubRepository \
+          publishMacosX64PublicationToGithubRepository \
           -Ptargets=apple
 
   build-non-apple:
