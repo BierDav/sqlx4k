@@ -66,8 +66,10 @@ jobs:
           ndk-version: r27  # Using a stable NDK version
           local-cache: true
 
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk
+      - name: Install cargo-ndk (with cache)
+        uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-ndk
 
       - name: Install MinGW-w64
         run: brew install mingw-w64
