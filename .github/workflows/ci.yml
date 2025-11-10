@@ -67,7 +67,7 @@ jobs:
 
       - name: Gradle Build
         run: |
-          ./gradlew 
+          ./gradlew \
           sqlx4k:publishAllPublicationsToGithubRepository \
           sqlx4k-mysql:publishAllPublicationsToGithubRepository \
           sqlx4k-postgres:publishAllPublicationsToGithubRepository \
@@ -156,7 +156,7 @@ jobs:
 
       - name: Gradle Build
         run: |
-          ./gradlew 
+          ./gradlew \
           publishAllPublicationsToGithubRepository \
           -Ptargets=non-apple
         env:
