@@ -4,6 +4,7 @@ import io.github.smyrgeorge.sqlx4k.Driver
 import io.github.smyrgeorge.sqlx4k.Hooks
 import io.github.smyrgeorge.sqlx4k.QueryExecutor
 import io.github.smyrgeorge.sqlx4k.Transaction
+import io.github.smyrgeorge.sqlx4k.impl.hook.HookApi
 import io.github.smyrgeorge.sqlx4k.impl.hook.MutableEventBus
 import io.github.smyrgeorge.sqlx4k.impl.hook.subscribeAsync
 import io.github.smyrgeorge.sqlx4k.impl.metadata.MetadataStorage
@@ -34,13 +35,15 @@ private fun MetadataStorage.requireTransactionMetadata() = get<InvalidationTrans
 private fun MetadataStorage.requireInvalidationScope() = get<InvalidationScope>()
     ?: error("QueryExecutor without ${InvalidationScope::class.simpleName} metadata found. Have you called `Driver.invalidationHandler()` in a stable coroutine scope?: ${this::class.simpleName}")
 
+interface InvalidationHandlerTarget : QueryExecutor, QueryExecutor.Transactional, HookApi
+
 /**
  * Applies the required hooks for the InvalidationHandler. Be aware that this will enable [MutableEventBus.enableGlobally].
  * Call this in a stable coroutine scope. As soon as the parent CoroutineScope gets cancelled, all Repository calls will fail.
  *
  * @see MutableEventBus.enableGlobally
  */
-fun Driver.applyInvalidationHandler(coroutineScope: CoroutineScope) {
+fun InvalidationHandlerTarget.applyInvalidationHandler(coroutineScope: CoroutineScope) {
     MutableEventBus.enableGlobally = true
 
     val scope = InvalidationScope()
@@ -93,11 +96,7 @@ fun <T> QueryExecutor.listenForInvalidation(
 ): Flow<T> {
     val scope = metadata.requireInvalidationScope()
     return channelFlow {
-        val dependentTables = tables.toSet()
-        if (dependentTables.isEmpty()) {
-            send(query())
-            return@channelFlow
-        }
+        val dependentTables = tables.toSet() + Any::class
 
         scope.invalidationFlow
             .filter { invalidatedSet ->

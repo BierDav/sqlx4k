@@ -3,6 +3,7 @@ package io.github.smyrgeorge.sqlx4k
 import io.github.smyrgeorge.sqlx4k.impl.hook.AfterHookEvent
 import io.github.smyrgeorge.sqlx4k.impl.hook.HookApi
 import io.github.smyrgeorge.sqlx4k.impl.hook.HookEvent
+import io.github.smyrgeorge.sqlx4k.invalidation.InvalidationHandlerTarget
 
 /**
  * Represents a driver interface that extends various query execution and management capabilities.
@@ -16,7 +17,8 @@ import io.github.smyrgeorge.sqlx4k.impl.hook.HookEvent
  * and management capabilities, including query execution, connection pooling, transactional
  * operations, and migration mechanisms.
  */
-interface Driver : ConnectionPool, QueryExecutor, QueryExecutor.Transactional, QueryExecutor.Migrate, HookApi {
+interface Driver : ConnectionPool, QueryExecutor, QueryExecutor.Transactional, QueryExecutor.Migrate, HookApi,
+    InvalidationHandlerTarget {
     // Acquire
     class BeforeAcquireHook(override val source: Driver) : HookEvent<Driver>
     class AfterAcquireHook(
