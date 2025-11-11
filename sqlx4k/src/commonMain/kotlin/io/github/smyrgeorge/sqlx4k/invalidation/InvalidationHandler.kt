@@ -35,7 +35,6 @@ private fun MetadataStorage.requireTransactionMetadata() = get<InvalidationTrans
 private fun MetadataStorage.requireInvalidationScope() = get<InvalidationScope>()
     ?: error("QueryExecutor without ${InvalidationScope::class.simpleName} metadata found. Have you called `Driver.invalidationHandler()` in a stable coroutine scope?: ${this::class.simpleName}")
 
-interface InvalidationHandlerTarget : QueryExecutor, QueryExecutor.Transactional, HookApi
 
 /**
  * Applies the required hooks for the InvalidationHandler. Be aware that this will enable [MutableEventBus.enableGlobally].
@@ -43,12 +42,13 @@ interface InvalidationHandlerTarget : QueryExecutor, QueryExecutor.Transactional
  *
  * @see MutableEventBus.enableGlobally
  */
-fun InvalidationHandlerTarget.applyInvalidationHandler(coroutineScope: CoroutineScope) {
+fun Driver.applyInvalidationHandler(
+    coroutineScope: CoroutineScope,
+    scope: InvalidationScope = InvalidationScope()
+) {
     MutableEventBus.enableGlobally = true
 
-    val scope = InvalidationScope()
     metadata.set(scope)
-
     hook.subscribeAsync(coroutineScope, Driver.AfterAcquireHook::class) {
         it.result.getOrNull()?.metadata?.set(scope)
     }
@@ -58,7 +58,6 @@ fun InvalidationHandlerTarget.applyInvalidationHandler(coroutineScope: Coroutine
             set(InvalidationTransactionMetadata())
         }
     }
-
 
     hook.subscribeAsync(coroutineScope, Hooks.AfterCrudRepoStatement::class) {
         when (it.source) {
@@ -80,7 +79,6 @@ fun InvalidationHandlerTarget.applyInvalidationHandler(coroutineScope: Coroutine
         scope.invalidate(transactionMetadata.dependentTables)
         transactionMetadata.dependentTables.clear()
     }
-
     hook.subscribeAsync(coroutineScope, Transaction.AfterRollbackHook::class) {
         if (it.result.isFailure)
             return@subscribeAsync
