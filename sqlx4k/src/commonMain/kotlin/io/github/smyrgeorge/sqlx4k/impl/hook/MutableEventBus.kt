@@ -12,23 +12,21 @@ import kotlin.time.measureTime
 
 class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) : EventBus<T> {
     private val listenersMutex = Mutex()
-    private val listeners = AtomicReference(mapOf<KClass<*>, Set<EventBusRawSubscriber<*>>>())
+    private val listeners = AtomicReference(mapOf<KClass<*>, Set<EventBusSubscriber<*>>>())
 
 
     override suspend fun <K : T> subscribe(
         firstType: KClass<K>,
         vararg otherTypes: KClass<K>,
-        handler: EventBusRawSubscriber<K>
+        handler: EventBusSubscriber<K>
     ) {
         if (!enableGlobally)
             error("Event bus is not enabled globally. Please enable it by setting the `MutableEventBus.enableGlobally` flag to true.")
         val eventTypes = otherTypes.toSet() + firstType
         listenersMutex.withLock {
             val newMap = listeners.load().toMutableMap()
-            for (eventType in eventTypes) {
-                newMap[eventType] =
-                    (newMap[eventType]?.plus(handler) ?: mutableSetOf(handler)) as Set<EventBusRawSubscriber<*>>
-            }
+            for (eventType in eventTypes)
+                newMap[eventType] = newMap[eventType]?.plus(handler) ?: mutableSetOf(handler)
             listeners.exchange(newMap)
         }
         try {
@@ -41,7 +39,7 @@ class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) :
                     if (listeners.size <= 1)
                         newMap.remove(eventType)
                     else
-                        newMap[eventType] = listeners.minus(handler) as Set<EventBusRawSubscriber<*>>
+                        newMap[eventType] = listeners.minus(handler)
                 }
             }
         }
@@ -67,7 +65,7 @@ class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) :
 //                value = lazyValue()
             value
         }
-        var listeners: Set<EventBusRawSubscriber<*>>? = null
+        var listeners: Set<EventBusSubscriber<*>>? = null
 
         measureTime {
             listeners = this.listeners.load().filter { it.key.isInstance(value) }.flatMap { it.value }.toSet()
@@ -84,7 +82,7 @@ class MutableEventBus<T : Any>(val parentEventBus: MutableEventBus<T>? = null) :
                 for (handler in listeners!!) {
                     launch {
                         @Suppress("UNCHECKED_CAST")
-                        (handler as EventBusRawSubscriber<K>).invoke(getLazyValue(), type)
+                        (handler as EventBusSubscriber<T>).invoke(getLazyValue())
                     }
                 }
             }
