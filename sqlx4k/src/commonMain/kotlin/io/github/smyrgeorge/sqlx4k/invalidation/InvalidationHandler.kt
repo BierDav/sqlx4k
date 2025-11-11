@@ -19,9 +19,9 @@ class InvalidationScope {
      */
     private val _invalidationFlow = MutableSharedFlow<Set<KClass<*>>>(extraBufferCapacity = 1)
 
-    val invalidationFlow: SharedFlow<Set<KClass<*>>> = _invalidationFlow.asSharedFlow()
+    internal val invalidationFlow: SharedFlow<Set<KClass<*>>> = _invalidationFlow.asSharedFlow()
 
-    internal fun invalidate(tables: Iterable<KClass<*>>) {
+    fun invalidate(tables: Iterable<KClass<*>>) {
         _invalidationFlow.tryEmit(tables.toSet())
     }
 }
