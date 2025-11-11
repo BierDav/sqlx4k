@@ -43,6 +43,9 @@ class SQLError(
 
         // Transaction
         TransactionIsClosed,
+        TransactionFailed,
+        TransactionCommitFailed,
+        TransactionRollbackFailed,
 
         // Decode
         CannotDecode,

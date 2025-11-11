@@ -1,6 +1,5 @@
 package io.github.smyrgeorge.sqlx4k
 
-import io.github.smyrgeorge.sqlx4k.impl.hook.HookEvent
 import io.github.smyrgeorge.sqlx4k.impl.metadata.MetadataStorage
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migration
 import io.github.smyrgeorge.sqlx4k.impl.migrate.Migrator
@@ -30,6 +29,7 @@ interface QueryExecutor {
      * different from the metadata of a [Transaction] or [Driver]
      * */
     val metadata: MetadataStorage
+
     /**
      * Executes the given SQL statement asynchronously.
      *
@@ -121,14 +121,26 @@ interface QueryExecutor {
          */
         suspend fun <T> transaction(f: suspend Transaction.() -> T): T {
             val tx: Transaction = begin().getOrThrow()
-            return try {
-                val res = f(tx)
-                tx.commit()
-                res
+            val result = try {
+                f(tx)
             } catch (e: Throwable) {
-                tx.rollback()
-                throw e
+                tx.rollback().getOrElse {
+                    throw SQLError(
+                        SQLError.Code.TransactionRollbackFailed,
+                        "Failed to roll back transaction after exception in body: ${e.message}",
+                        it
+                    )
+                }
+                throw SQLError(
+                    SQLError.Code.TransactionFailed,
+                    "Transaction has been rolled back: ${e.message}",
+                    e
+                )
             }
+            tx.commit().getOrElse {
+                throw SQLError(SQLError.Code.TransactionCommitFailed, "Failed to commit transaction", it)
+            }
+            return result
         }
     }
 
