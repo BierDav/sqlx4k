@@ -75,11 +75,18 @@ jobs:
           -Ptargets=apple
 
   build-non-apple:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space-action@master
+        with:
+          remove-docker-images: true
+          remove-dotnet: true
+          remove-haskell: true
+
       - name: Checkout Project
         uses: actions/checkout@v5
 
@@ -112,11 +119,11 @@ jobs:
             /home/runner/.konan
           key: general-lib-cache
 
-      - name: Install Rust Toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
+#      - name: Install Rust Toolchain
+#        uses: actions-rs/toolchain@v1
+#        with:
+#          profile: minimal
+#          toolchain: stable
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
