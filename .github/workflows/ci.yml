@@ -113,8 +113,9 @@ jobs:
           key: general-lib-cache
 
       - name: Install Rust Toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rs/toolchain@v1
         with:
+          profile: minimal
           toolchain: stable
 
       - name: Cache Rust dependencies
