@@ -113,7 +113,7 @@ jobs:
             sqlx4k-sqlite/src/rust
           cache-all-crates: 'true'
           cache-bin: 'true'
-          key: rust-lib-cache
+          shared-key: rust-lib-cache
 
       - name: Setup Rust & cargo
         run: |
@@ -127,8 +127,7 @@ jobs:
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r27  # Using a stable NDK version
-          local-cache: true
+          ndk-version: r27
 
       - name: Install cargo-ndk (with cache)
         uses: taiki-e/cache-cargo-install-action@v2
@@ -144,14 +143,9 @@ jobs:
           g++-aarch64-linux-gnu \
           mingw-w64
 
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@v10
-        with:
-          remove-docker-images: true
-          remove-dotnet: true
-          remove-haskell: true
-          remove-codeql: true
-
+      - name: "Query disk space"
+        run: |
+          df -h
 
       - name: Checkout Project
         uses: actions/checkout@v5
