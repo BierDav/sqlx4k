@@ -80,12 +80,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@v10
-        with:
-          remove-docker-images: true
-          remove-dotnet: true
-          remove-haskell: true
+
 
       - name: Checkout Project
         uses: actions/checkout@v5
@@ -165,6 +160,13 @@ jobs:
           g++-aarch64-linux-gnu \
           mingw-w64
 
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v10
+        with:
+          remove-docker-images: true
+          remove-dotnet: true
+          remove-haskell: true
+          remove-codeql: true
 
       - name: Gradle Build
         run: |
