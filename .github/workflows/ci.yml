@@ -80,23 +80,10 @@ jobs:
       contents: read
       packages: write
     steps:
-
-
-      - name: Checkout Project
-        uses: actions/checkout@v5
-
       - name: Set dynamic version
         run: |
           ls -l
           sed -i 's/version = "[^"]*"/version = "1.6.${{ github.run_number }}"/' build.gradle.kts
-
-      - name: Create local.properties
-        run: |
-          echo "githubActor=${{ github.actor }}" > local.properties
-          echo "githubToken=${{ secrets.GITHUB_TOKEN }}" >> local.properties
-          echo "signingInMemoryKeyId=${{ secrets.SIGNINGINMEMORYKEYID }}" >> local.properties
-          echo "signingInMemoryKeyPassword=${{ secrets.SIGNINGINMEMORYKEYPASSWORD }}" >> local.properties
-          echo "signingInMemoryKey=${{ secrets.SIGNINGINMEMORYKEY }}" >> local.properties
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -167,6 +154,18 @@ jobs:
           remove-dotnet: true
           remove-haskell: true
           remove-codeql: true
+
+
+      - name: Checkout Project
+        uses: actions/checkout@v5
+
+      - name: Create local.properties
+        run: |
+          echo "githubActor=${{ github.actor }}" > local.properties
+          echo "githubToken=${{ secrets.GITHUB_TOKEN }}" >> local.properties
+          echo "signingInMemoryKeyId=${{ secrets.SIGNINGINMEMORYKEYID }}" >> local.properties
+          echo "signingInMemoryKeyPassword=${{ secrets.SIGNINGINMEMORYKEYPASSWORD }}" >> local.properties
+          echo "signingInMemoryKey=${{ secrets.SIGNINGINMEMORYKEY }}" >> local.properties
 
       - name: Gradle Build
         run: |
